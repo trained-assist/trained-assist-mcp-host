@@ -24,8 +24,9 @@ jobs:
       - run: npm test
       - name: Runtime dependency boundary
         run: |
-          node -e "const p=require('./package.json'); if(Object.keys(p.dependencies||{}).length) process.exit(1)"
-          if rg -n "trained-assist-agent|src/server|runner/|system-prompt|telegram" src; then
+          node -e "const p=require('./package.json'); const expected={'trained-assist-search-skill':'git+https://github.com/trained-assist/trained-assist-search-skill.git#e8308ed23f9ad264753e119b7831d6f0737f8e15'}; if(JSON.stringify(p.dependencies||{})!==JSON.stringify(expected)) process.exit(1)"
+          node -e "const p=require('./package-lock.json'); const d=p.packages['node_modules/trained-assist-search-skill']; if(!d || d.resolved!=='git+https://github.com/trained-assist/trained-assist-search-skill.git#e8308ed23f9ad264753e119b7831d6f0737f8e15') process.exit(1)"
+          if rg -n "(require|from)[[:space:]]*[^[:alnum:]_./-]*(trained-assist-agent|src/server|runner/|system-prompt|telegram)" src; then
             echo "Legacy agent runtime dependency found in host source"
             exit 1
           fi

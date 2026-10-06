@@ -2,17 +2,20 @@
 
 Standalone MCP host runtime for Trained Assist providers. It owns transport adapters, tool catalog composition, per-call authorization, binding resolution, and bounded dispatch. Domain handlers remain in their owning repositories and are injected as provider adapters.
 
-This repository has no runtime dependency on `trained-assist-agent`, its runner, Telegram, prompt assembly, Task Store, scheduler, or profile storage. It has no production provider configured. The test Worker entrypoint below is a separate hard-scoped read-only fixture for the first CP→Runner integration slice.
+This repository has no runtime dependency on `trained-assist-agent`, its runner, Telegram, prompt assembly, Task Store, scheduler, or profile storage. Its only domain runtime dependency is the Search provider at an immutable source commit. No production provider is configured. The test Worker entrypoint below remains a separate hard-scoped Registry fixture for the first CP→Runner integration slice.
 
 ## Runtime
 
-Node.js 22 or newer; no third-party runtime dependencies.
+Node.js 22 or newer. The host pins the `trained-assist-search-skill` provider by exact git commit; its tool is composed only by an embedding host that explicitly creates it.
 
 ```js
-const { createHost } = require('trained-assist-mcp-host');
+const { createHost, createSearchProvider } = require('trained-assist-mcp-host');
 
 const host = createHost({
-  providers: [{
+  providers: [createSearchProvider({
+    // Trusted deployment configuration, not caller/tool input.
+    searchOrigin: process.env.SEARCH_SERP_ORIGIN,
+  }), {
     id: 'example-domain',
     version: '1.2.3',
     tools: [{
@@ -66,3 +69,5 @@ npm run check
 ```
 
 Offline tests use only in-memory providers and local HTTP fixtures. They do not prove live credentials, remote provider availability, deployment, or consumer cutover.
+
+The Search provider exposes only `search_serp_free`. It requires an explicit trusted HTTPS origin, refuses redirects, and bounds request count, query size, response bytes, and cancellation. The integration test uses `https://search.test.invalid` with a synthetic response; no public search query is sent. Deployments must separately approve the exact egress origin and query privacy policy before enabling this provider for real requests.
