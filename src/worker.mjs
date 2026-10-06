@@ -8,6 +8,7 @@ const profileId = 'integration-telegram-ux-v1';
 const bindingRef = 'registry-mcp-test-160-read';
 const policyVersion = 'registry-fixture-policy-v1';
 const catalogueVersion = 'registry-fixture-catalogue-v1';
+const executionScope = 'registry:fixture-read';
 const fixtureMarker = 'registry-fixture-marker-160-v1';
 const required = [
   'MCP_TEST_AUTH_TOKEN',
@@ -62,7 +63,7 @@ async function verifyRunBinding(token, env, expected) {
     const header = JSON.parse(new TextDecoder().decode(decodePart(parts[0])));
     const claims = JSON.parse(new TextDecoder().decode(decodePart(parts[1])));
     if (!header || Object.keys(header).sort().join(',') !== 'alg,typ' || header.alg !== 'EdDSA' || header.typ !== 'JWT') return null;
-    const expectedClaims = ['allowedTools', 'aud', 'bindingRef', 'catalogueVersion', 'exp', 'iat', 'iss', 'policyVersion', 'principalId', 'profileId', 'registryDigest', 'runId', 'serverId', 'sub', 'userTaskId'];
+    const expectedClaims = ['allowedTools', 'aud', 'bindingRef', 'catalogueVersion', 'exp', 'iat', 'iss', 'policyVersion', 'principalId', 'profileId', 'registryDigest', 'runId', 'scope', 'serverId', 'sub', 'userTaskId'];
     if (!claims || typeof claims !== 'object' || Array.isArray(claims)
         || Object.keys(claims).sort().join(',') !== expectedClaims.sort().join(',')) return null;
     const key = await crypto.subtle.importKey('jwk', JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK), { name: 'Ed25519' }, false, ['verify']);
@@ -75,6 +76,7 @@ async function verifyRunBinding(token, env, expected) {
         || claims.principalId !== env.MCP_TEST_PRINCIPAL_ID || claims.serverId !== serverId
         || claims.bindingRef !== bindingRef || !Array.isArray(claims.allowedTools)
         || claims.allowedTools.length !== 1 || claims.allowedTools[0] !== toolName
+        || claims.scope !== expected.scope
         || claims.policyVersion !== policyVersion || claims.catalogueVersion !== catalogueVersion
         || claims.registryDigest !== expected.registryDigest
         || !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp)
@@ -116,19 +118,19 @@ function hostFor(env) {
       let runId;
       let proofExpiry;
       if (requestedOperation === 'discovery') {
-        if (headers?.get?.('x-mcp-run-id') || headers?.get?.('x-mcp-run-binding')) return null;
+        if (headers?.get?.('x-mcp-run-id') || headers?.get?.('x-mcp-run-binding') || headers?.get?.('x-mcp-scope')) return null;
         const requestGeneration = Number(headers?.get?.('x-mcp-generation'));
         const requestPrincipalId = headers?.get?.('x-mcp-principal-id') || '';
         if (method !== 'tools/list' || requestGeneration !== generation || requestPrincipalId !== env.MCP_TEST_PRINCIPAL_ID) return null;
         runId = undefined;
       } else {
-        if (requestedOperation && requestedOperation !== 'invocation') return null;
+        if (requestedOperation !== 'invocation' || headers?.get?.('x-mcp-scope') !== executionScope) return null;
         runId = headers?.get?.('x-mcp-run-id') || '';
         if (!/^run_[a-f0-9-]{36}$/.test(runId)) return null;
-        if (method !== 'tools/call') return null;
+        if (method !== 'tools/call' && method !== 'tools/list') return null;
         const catalogue = cachedHost?.catalog.digest;
         if (!catalogue) return null;
-        const proof = await verifyRunBinding(headers?.get?.('x-mcp-run-binding'), env, { runId, taskId, registryDigest: catalogue });
+        const proof = await verifyRunBinding(headers?.get?.('x-mcp-run-binding'), env, { runId, taskId, scope: executionScope, registryDigest: catalogue });
         if (!proof) return null;
         proofExpiry = proof.exp * 1000;
       }

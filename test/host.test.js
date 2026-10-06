@@ -267,7 +267,7 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
       userTaskId: 'task-160', profileId: 'integration-telegram-ux-v1', principalId: 'integration-telegram-ux-v1',
       serverId: 'trained-assist-registry-test', bindingRef: 'registry-mcp-test-160-read',
       allowedTools: ['registry.fixture_read'], policyVersion: 'registry-fixture-policy-v1',
-      catalogueVersion: 'registry-fixture-catalogue-v1', registryDigest: workerDigest,
+      catalogueVersion: 'registry-fixture-catalogue-v1', registryDigest: workerDigest, scope: 'registry:fixture-read',
       iat: now - 1, exp: now + 30, ...overrides,
     };
     const input = `${b64(JSON.stringify({ alg: 'EdDSA', typ: 'JWT' }))}.${b64(JSON.stringify(claims))}`;
@@ -328,6 +328,8 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
 
   const invocation = await request({
     ...baseScope,
+    'x-mcp-operation': 'invocation',
+    'x-mcp-scope': 'registry:fixture-read',
     'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef',
     'x-mcp-run-binding': await signProof(),
   }, { jsonrpc: '2.0', id: 'run-call', method: 'tools/call', params: { name: 'registry.fixture_read' } });
@@ -339,17 +341,35 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     runId: 'run_01234567-89ab-cdef-0123-456789abcdef',
   });
 
+  const initialize = await request({}, { jsonrpc: '2.0', id: 'initialize', method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'fixture-client', version: '1' } } });
+  assert.equal((await initialize.json()).result.protocolVersion, '2024-11-05');
+  const initialized = await request({}, { jsonrpc: '2.0', method: 'notifications/initialized' });
+  assert.equal(initialized.status, 202);
+  const invocationList = await request({
+    ...baseScope,
+    'x-mcp-operation': 'invocation',
+    'x-mcp-scope': 'registry:fixture-read',
+    'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef',
+    'x-mcp-run-binding': await signProof(),
+  }, { jsonrpc: '2.0', id: 'run-list', method: 'tools/list' });
+  assert.equal(invocationList.status, 200);
+  assert.deepEqual((await invocationList.json()).result.tools.map((tool) => tool.name), ['registry.fixture_read']);
+
   const denyInvocation = async (headers, proof) => {
-    const response = await request({ ...baseScope, 'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef', ...headers, ...(proof ? { 'x-mcp-run-binding': proof } : {}) },
+    const response = await request({ ...baseScope, 'x-mcp-operation': 'invocation', 'x-mcp-scope': 'registry:fixture-read', 'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef', ...headers, ...(proof ? { 'x-mcp-run-binding': proof } : {}) },
       { jsonrpc: '2.0', id: 'denied-proof', method: 'tools/call', params: { name: 'registry.fixture_read' } });
     assert.equal((await response.json()).error.code, -32001);
   };
   await denyInvocation({}, null);
   await denyInvocation({}, await signProof({ runId: 'run_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', sub: 'run_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }));
   await denyInvocation({}, await signProof({ bindingRef: 'another-binding' }));
+  await denyInvocation({ 'x-mcp-scope': 'registry:write' }, await signProof());
+  await denyInvocation({}, await signProof({ scope: 'registry:write' }));
   await denyInvocation({}, await signProof({ allowedTools: ['registry.fixture_write'] }));
   await denyInvocation({}, await signProof({ catalogueVersion: 'another-catalogue' }));
   await denyInvocation({}, await signProof({ unexpectedClaim: 'must-not-be-ignored' }));
+  await denyInvocation({ 'x-mcp-operation': '' }, await signProof());
+  await denyInvocation({ 'x-mcp-scope': '' }, await signProof());
   await denyInvocation({ 'x-mcp-profile': 'another-profile' }, await signProof());
   await denyInvocation({ 'x-mcp-user-task-id': 'another-task' }, await signProof());
   await denyInvocation({}, await signProof({ exp: Math.floor(Date.now() / 1000) - 1 }));
