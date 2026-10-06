@@ -41,10 +41,12 @@ Mount `host.httpHandler` on a Node HTTP server only when an owning runner provid
 ### Isolated test Worker
 
 For Registry fixture invocations the Worker requires `X-MCP-Operation: invocation` and
-`X-MCP-Scope: registry:fixture-read`. The EdDSA claims include that scope and must match
-the actual run/task/profile/principal/server/binding/tool/version headers and pinned
-Registry digest. Discovery remains a separate `tools/list` request without run ID or
-invocation scope. CP's random `catalogueId` is not a catalogue version.
+`X-MCP-Scope: registry:fixture-read`. Invocation claims bind the run/task/profile and
+the pinned principal/server/binding/tool/policy/catalogue/digest; the Worker compares
+those claims against actual run/task/profile/scope headers and trusted configuration.
+The proof is required for both invocation `tools/list` and `tools/call`; listing exposes
+only the authorized tool. Discovery remains a separate `tools/list` request without a
+run ID or invocation scope. CP's random `catalogueId` is not a catalogue version.
 
 `wrangler.jsonc` deploys only `trained-assist-mcp-host-test-160` on its `workers.dev` URL. It has no custom route, service binding, or production provider. Until the test secret, public verification key, and expiry are configured it returns `503`; when configured it exposes exactly `registry.fixture_read` for the pinned profile/principal. CP catalogue discovery sends `X-MCP-Operation: discovery`, `X-MCP-User-Task-Id`, `X-MCP-Generation`, `X-MCP-Profile`, and `X-MCP-Principal-Id`; discovery has no `runId` and is restricted to `tools/list`. Runner invocation sends `X-MCP-Operation: invocation`, `X-MCP-Scope: registry:fixture-read`, `X-MCP-User-Task-Id`, `X-MCP-Profile`, canonical `X-MCP-Run-Id`, and `X-MCP-Run-Binding`. The latter is an EdDSA compact JWS signed by Runner and bound to that real run, task, profile, principal, server, binding, scope, tool allowlist, policy, pinned catalogue version and digest, and expiry. The Worker verifies it with `MCP_TEST_RUNNER_PUBLIC_JWK`; its expiry cannot outlive the Worker test lease. The shared test-only opaque Bearer is transport authentication only and cannot authorize invocation by itself. Put `MCP_TEST_AUTH_TOKEN` in the test Worker secret store and matching CP/Runner test binding through each owner's trusted config path; configure the Runner public JWK through the Worker variable path. Never put credentials or proofs in RunSpec, prompt text, issue comments, or manifests. No token mint endpoint is provided.
 

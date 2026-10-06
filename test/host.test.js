@@ -341,6 +341,20 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     runId: 'run_01234567-89ab-cdef-0123-456789abcdef',
   });
 
+  const initialize = await request({}, { jsonrpc: '2.0', id: 'initialize', method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'fixture-client', version: '1' } } });
+  assert.equal((await initialize.json()).result.protocolVersion, '2024-11-05');
+  const initialized = await request({}, { jsonrpc: '2.0', method: 'notifications/initialized' });
+  assert.equal(initialized.status, 202);
+  const invocationList = await request({
+    ...baseScope,
+    'x-mcp-operation': 'invocation',
+    'x-mcp-scope': 'registry:fixture-read',
+    'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef',
+    'x-mcp-run-binding': await signProof(),
+  }, { jsonrpc: '2.0', id: 'run-list', method: 'tools/list' });
+  assert.equal(invocationList.status, 200);
+  assert.deepEqual((await invocationList.json()).result.tools.map((tool) => tool.name), ['registry.fixture_read']);
+
   const denyInvocation = async (headers, proof) => {
     const response = await request({ ...baseScope, 'x-mcp-operation': 'invocation', 'x-mcp-scope': 'registry:fixture-read', 'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef', ...headers, ...(proof ? { 'x-mcp-run-binding': proof } : {}) },
       { jsonrpc: '2.0', id: 'denied-proof', method: 'tools/call', params: { name: 'registry.fixture_read' } });

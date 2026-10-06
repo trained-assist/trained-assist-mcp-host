@@ -127,7 +127,7 @@ function hostFor(env) {
         if (requestedOperation !== 'invocation' || headers?.get?.('x-mcp-scope') !== executionScope) return null;
         runId = headers?.get?.('x-mcp-run-id') || '';
         if (!/^run_[a-f0-9-]{36}$/.test(runId)) return null;
-        if (method !== 'tools/call') return null;
+        if (method !== 'tools/call' && method !== 'tools/list') return null;
         const catalogue = cachedHost?.catalog.digest;
         if (!catalogue) return null;
         const proof = await verifyRunBinding(headers?.get?.('x-mcp-run-binding'), env, { runId, taskId, scope: executionScope, registryDigest: catalogue });
