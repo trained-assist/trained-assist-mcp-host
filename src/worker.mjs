@@ -12,6 +12,7 @@ const required = [
   'MCP_TEST_AUTH_TOKEN',
   'MCP_TEST_PRINCIPAL_ID',
   'MCP_TEST_EXPIRES_AT',
+  'MCP_TEST_RUNNER_PUBLIC_JWK',
 ];
 
 let cachedEnv;
@@ -32,10 +33,41 @@ async function sameSecret(actual, expected) {
 }
 
 function configured(env) {
-  return required.every((key) => typeof env[key] === 'string' && env[key].trim())
-    && Number.isFinite(Date.parse(env.MCP_TEST_EXPIRES_AT))
+  if (!required.every((key) => typeof env[key] === 'string' && env[key].trim())) return false;
+  try { JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK); } catch { return false; }
+  return Number.isFinite(Date.parse(env.MCP_TEST_EXPIRES_AT))
     && Number.isSafeInteger(Number(env.MCP_TEST_GENERATION || 1))
     && Number(env.MCP_TEST_GENERATION || 1) > 0;
+}
+
+function decodePart(value) {
+  return Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (char) => char.charCodeAt(0));
+}
+
+async function verifyRunBinding(token, env, expected) {
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const header = JSON.parse(new TextDecoder().decode(decodePart(parts[0])));
+    const claims = JSON.parse(new TextDecoder().decode(decodePart(parts[1])));
+    if (header.alg !== 'EdDSA' || header.typ !== 'JWT') return null;
+    const key = await crypto.subtle.importKey('jwk', JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK), { name: 'Ed25519' }, false, ['verify']);
+    const valid = await crypto.subtle.verify({ name: 'Ed25519' }, key, decodePart(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+    if (!valid) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (claims.iss !== 'trained-assist-agent-runner' || claims.aud !== audience
+        || claims.sub !== expected.runId || claims.runId !== expected.runId
+        || claims.userTaskId !== expected.taskId || claims.profileId !== profileId
+        || claims.principalId !== env.MCP_TEST_PRINCIPAL_ID || claims.serverId !== serverId
+        || claims.bindingRef !== bindingRef || JSON.stringify(claims.allowedTools) !== JSON.stringify([toolName])
+        || claims.policyVersion !== policyVersion || typeof claims.catalogueVersion !== 'string' || !claims.catalogueVersion
+        || claims.registryDigest !== expected.registryDigest
+        || !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp)
+        || claims.iat > now + 30 || claims.exp <= now || claims.exp <= claims.iat
+        || claims.exp > Math.floor(Date.parse(env.MCP_TEST_EXPIRES_AT) / 1000)) return null;
+    return claims;
+  } catch { return null; }
 }
 
 function hostFor(env) {
@@ -68,14 +100,18 @@ function hostFor(env) {
       if (!taskId || taskId.length > 200 || requestProfileId !== profileId) return null;
       let runId;
       if (requestedOperation === 'discovery') {
+        if (headers?.get?.('x-mcp-run-id') || headers?.get?.('x-mcp-run-binding')) return null;
         const requestGeneration = Number(headers?.get?.('x-mcp-generation'));
         const requestPrincipalId = headers?.get?.('x-mcp-principal-id') || '';
         if (method !== 'tools/list' || requestGeneration !== generation || requestPrincipalId !== env.MCP_TEST_PRINCIPAL_ID) return null;
-        runId = `discovery:${taskId}:${generation}`;
+        runId = undefined;
       } else {
         if (requestedOperation && requestedOperation !== 'invocation') return null;
         runId = headers?.get?.('x-mcp-run-id') || '';
         if (!/^run_[a-f0-9-]{36}$/.test(runId)) return null;
+        if (method !== 'tools/call') return null;
+        const catalogue = cachedHost?.catalog.digest;
+        if (!catalogue || !await verifyRunBinding(headers?.get?.('x-mcp-run-binding'), env, { runId, taskId, registryDigest: catalogue })) return null;
       }
       return {
         taskId,
@@ -83,6 +119,7 @@ function hostFor(env) {
         profileId,
         principalId: env.MCP_TEST_PRINCIPAL_ID,
         runId,
+        operationId: requestedOperation === 'discovery' ? 'discovery' : 'invocation',
         bindingRef,
         allowedTools: [toolName],
         policyVersion,
