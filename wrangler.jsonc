@@ -7,6 +7,7 @@
   "workers_dev": true,
   "observability": { "enabled": true },
   "vars": {
-    "MCP_TEST_PRINCIPAL_ID": "integration-telegram-ux-v1"
+    "MCP_TEST_PRINCIPAL_ID": "integration-telegram-ux-v1",
+    "MCP_TEST_CATALOGUE_VERSION": "registry-fixture-catalogue-v1"
   }
 }
