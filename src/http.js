@@ -20,21 +20,9 @@ function send(res, status, value) {
   res.end(body);
 }
 
-function createHttpHandler({ protocol, tokens }) {
+function createHttpHandler({ protocol }) {
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
-    if (req.method === 'POST' && url.pathname === '/mcp/token') {
-      if (!tokens.canMint(req.headers.authorization)) return send(res, 401, { error: 'unauthorized' });
-      try {
-        const body = await readJson(req, 16 * 1024);
-        const taskId = String(body.taskId || '');
-        const username = String(body.username || '');
-        const token = tokens.issue({ taskId, username });
-        return send(res, 200, { token, url: '/mcp', username });
-      } catch (err) {
-        return send(res, err.statusCode || (err.code ? 400 : 500), { error: err.message });
-      }
-    }
     if (req.method !== 'POST' || url.pathname !== '/mcp') return send(res, 404, { error: 'not found' });
     let message;
     try { message = await readJson(req); }

@@ -1,20 +1,17 @@
 'use strict';
 
 const { createCatalog } = require('./catalog');
-const { createTokenStore } = require('./tokens');
 const { createProtocol } = require('./protocol');
 const { createHttpHandler } = require('./http');
 const { attachStdio } = require('./stdio');
 
-function createHost({ providers = [], env = process.env, now = Date.now, authorize, timeoutMs } = {}) {
+function createHost({ providers = [], authenticate, authorize, resolveBindings, audience, now, timeoutMs } = {}) {
   const catalog = createCatalog(providers);
-  const tokens = createTokenStore({ env, now });
-  const protocol = createProtocol({ catalog, tokens, authorize, timeoutMs });
+  const protocol = createProtocol({ catalog, authenticate, authorize, resolveBindings, audience, now, timeoutMs });
   return {
     catalog,
-    tokens,
     protocol,
-    httpHandler: createHttpHandler({ protocol, tokens }),
+    httpHandler: createHttpHandler({ protocol }),
     attachStdio: (options) => attachStdio(protocol, options),
   };
 }

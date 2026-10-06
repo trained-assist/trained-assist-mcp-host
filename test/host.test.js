@@ -4,23 +4,42 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createServer } = require('node:http');
 const { once } = require('node:events');
+const { PassThrough } = require('node:stream');
 const { createHost } = require('../src');
 
-const hostToken = `mcp_${'h'.repeat(40)}`;
+let tokenSequence = 0;
+const testAudience = 'trained-assist-mcp-host:test';
+const testScope = (profileId = 'profile_a', taskId = 'task-a', runId = 'run-a', allowedTools = ['read_marker']) => ({
+  taskId, generation: 1, profileId, principalId: `principal:${profileId}`, runId,
+  bindingRef: `test-binding:${profileId}`, allowedTools, policyVersion: 'test-policy-v1',
+  expiresAt: Date.now() + 60_000, audience: testAudience,
+});
 const providers = [{
   id: 'fixture',
+  version: '1.0.0-test',
   tools: [{
     name: 'read_marker',
     description: 'Return the run identity and supplied marker.',
     inputSchema: { type: 'object', properties: { marker: { type: 'string' } } },
-    handler: async ({ marker }, scope) => ({ marker, username: scope.username, taskId: scope.taskId }),
+    handler: async ({ marker }, scope) => ({ marker, profileId: scope.profileId, taskId: scope.taskId }),
   }],
 }];
 
 function setup(options = {}) {
-  const host = createHost({ providers, env: { MCP_HOST_TOKEN: hostToken }, ...options });
-  const token = host.tokens.issue({ taskId: 'task-a', username: 'profile_a' });
-  return { host, token, authorization: `Bearer ${token}` };
+  const credentials = new Map();
+  const token = `test-run-${++tokenSequence}`;
+  credentials.set(token, testScope());
+  let host;
+  host = createHost({
+    providers: options.providers || providers,
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: scope.registryDigest || host.catalog.digest } : null;
+    },
+    ...options,
+  });
+  return { host, token, credentials, authorization: `Bearer ${token}` };
 }
 
 test('catalog returns MCP definitions and rejects duplicate ownership', () => {
@@ -29,10 +48,10 @@ test('catalog returns MCP definitions and rejects duplicate ownership', () => {
     name: 'read_marker', description: 'Return the run identity and supplied marker.',
     inputSchema: { type: 'object', properties: { marker: { type: 'string' } } },
   }]);
-  assert.throws(() => createHost({ providers: [providers[0], providers[0]] }), { code: 'DUPLICATE_TOOL' });
+  assert.throws(() => createHost({ providers: [providers[0], { ...providers[0], id: 'duplicate-owner' }] }), { code: 'DUPLICATE_TOOL' });
 });
 
-test('run token scopes every tools/list and tools/call request to task and profile', async () => {
+test('trusted run scope filters tools/list and reaches the provider call', async () => {
   const { host, authorization } = setup();
   const listed = await host.protocol.handle({ message: { jsonrpc: '2.0', id: 1, method: 'tools/list' }, authorization });
   assert.equal(listed.result.tools[0].name, 'read_marker');
@@ -40,96 +59,162 @@ test('run token scopes every tools/list and tools/call request to task and profi
     message: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'read_marker', arguments: { marker: 'proof' } } },
     authorization,
   });
-  assert.deepEqual(JSON.parse(called.result.content[0].text), { marker: 'proof', username: 'profile_a', taskId: 'task-a' });
+  assert.deepEqual(JSON.parse(called.result.content[0].text), { marker: 'proof', profileId: 'profile_a', taskId: 'task-a' });
 });
 
-test('invalid, expired, and revoked run tokens cannot list or call tools', async () => {
-  let now = 1000;
-  const { host, token } = setup({ now: () => now });
+test('missing and malformed run scopes cannot list or call tools', async () => {
+  const { host, credentials } = setup();
   const message = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
-  assert.equal((await host.protocol.handle({ message, authorization: 'Bearer rt_invalid' })).error.code, -32001);
-  host.tokens.revoke(`Bearer ${token}`);
-  assert.equal((await host.protocol.handle({ message, authorization: `Bearer ${token}` })).error.code, -32001);
-
-  const expiring = host.tokens.issue({ taskId: 'task-b', username: 'profile_b' });
-  now += 60 * 60 * 1000;
-  assert.equal((await host.protocol.handle({ message, authorization: `Bearer ${expiring}` })).error.code, -32001);
+  assert.equal((await host.protocol.handle({ message, authorization: 'Bearer unknown' })).error.code, -32001);
+  credentials.set('bad-scope', { ...testScope('profile_x'), generation: undefined });
+  assert.equal((await host.protocol.handle({ message, authorization: 'Bearer bad-scope' })).error.code, -32001);
+  credentials.set('expired', { ...testScope(), expiresAt: Date.now() - 1 });
+  assert.equal((await host.protocol.handle({ message, authorization: 'Bearer expired' })).error.code, -32001);
+  credentials.set('wrong-audience', { ...testScope(), audience: 'another-service' });
+  assert.equal((await host.protocol.handle({ message, authorization: 'Bearer wrong-audience' })).error.code, -32001);
+  credentials.set('wrong-registry', { ...testScope(), registryDigest: '0'.repeat(64) });
+  assert.equal((await host.protocol.handle({ message, authorization: 'Bearer wrong-registry' })).error.code, -32001);
 });
 
 test('authorization callback runs for every call and sees immutable run scope', async () => {
   const seen = [];
-  const host = createHost({
-    providers,
-    env: { MCP_HOST_TOKEN: hostToken },
+  const { host, authorization } = setup({
     authorize: async ({ context, tool }) => { seen.push({ context, tool }); return false; },
   });
-  const token = host.tokens.issue({ taskId: 'task-c', username: 'profile_c' });
   const reply = await host.protocol.handle({
     message: { jsonrpc: '2.0', id: 'x', method: 'tools/call', params: { name: 'read_marker' } },
-    authorization: `Bearer ${token}`,
+    authorization,
   });
   assert.equal(reply.result.isError, true);
   assert.equal(seen.length, 1);
-  assert.equal(seen[0].context.username, 'profile_c');
+  assert.equal(seen[0].context.profileId, 'profile_a');
+  assert.equal(seen[0].context.principalId, 'principal:profile_a');
   assert.equal(seen[0].tool.providerId, 'fixture');
   assert.equal(Object.isFrozen(seen[0].context), true);
 });
 
 test('tool failures and timeouts are MCP tool errors, not protocol errors', async () => {
-  const failing = createHost({ providers: [{ id: 'bad', tools: [{ name: 'bad', handler: async () => { throw new Error('controlled'); } }] }], env: { MCP_HOST_TOKEN: hostToken } });
-  const token = failing.tokens.issue({ taskId: 't', username: 'u' });
-  const failure = await failing.protocol.handle({ message: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'bad' } }, authorization: `Bearer ${token}` });
+  const badSetup = setup({ providers: [{ id: 'bad', version: '1.0.0-test', tools: [{ name: 'bad', handler: async () => { throw new Error('controlled'); } }] }] });
+  const failing = badSetup.host;
+  badSetup.credentials.set(badSetup.token, testScope('p', 't', 'r', ['bad']));
+  const failure = await failing.protocol.handle({ message: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'bad' } }, authorization: `Bearer ${badSetup.token}` });
   assert.equal(failure.error, undefined);
   assert.equal(failure.result.isError, true);
   assert.equal(failure.result.content[0].text, 'controlled');
 
-  const slow = createHost({
-    providers: [{ id: 'slow', tools: [{ name: 'slow', handler: (_args, context) => new Promise((resolve) => context.signal.addEventListener('abort', () => resolve('aborted'), { once: true })) }] }],
-    env: { MCP_HOST_TOKEN: hostToken }, timeoutMs: 5,
+  let slow;
+  slow = createHost({
+    providers: [{ id: 'slow', version: '1.0.0-test', tools: [{ name: 'slow', handler: (_args, context) => new Promise((resolve) => context.signal.addEventListener('abort', () => resolve('aborted'), { once: true })) }] }],
+    audience: testAudience,
+    authenticate: async () => ({ ...testScope('p', 't', 'r', ['slow']), registryDigest: slow.catalog.digest }), timeoutMs: 5,
   });
-  const slowToken = slow.tokens.issue({ taskId: 't', username: 'u' });
-  const timeout = await slow.protocol.handle({ message: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'slow' } }, authorization: `Bearer ${slowToken}` });
+  const timeout = await slow.protocol.handle({ message: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'slow' } }, authorization: 'Bearer test' });
   assert.equal(timeout.result.isError, true);
   assert.equal(timeout.result.content[0].text, 'Tool timed out');
 });
 
 test('MCP cancellation aborts the provider signal and does not emit a notification response', async () => {
-  const host = createHost({ providers: [{ id: 'cancel', tools: [{ name: 'wait', handler: (_args, context) => new Promise((resolve) => context.signal.addEventListener('abort', () => resolve('aborted'), { once: true })) }] }], env: { MCP_HOST_TOKEN: hostToken } });
-  const token = host.tokens.issue({ taskId: 'cancel-task', username: 'profile_cancel' });
-  const call = host.protocol.handle({ message: { jsonrpc: '2.0', id: 'call-1', method: 'tools/call', params: { name: 'wait' } }, authorization: `Bearer ${token}` });
+  const credentials = new Map([
+    ['run-one', testScope('p', 't', 'run-1', ['wait'])],
+    ['run-two', testScope('p', 't', 'run-2', ['wait'])],
+  ]);
+  let host;
+  host = createHost({
+    providers: [{ id: 'cancel', version: '1.0.0-test', tools: [{ name: 'wait', handler: (_args, context) => new Promise((resolve) => context.signal.addEventListener('abort', () => resolve('aborted'), { once: true })) }] }],
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: scope.registryDigest || host.catalog.digest } : null;
+    },
+  });
+  const authorization = 'Bearer run-one';
+  const call = host.protocol.handle({ message: { jsonrpc: '2.0', id: 'call-1', method: 'tools/call', params: { name: 'wait' } }, authorization });
   await new Promise((resolve) => setImmediate(resolve));
-  const otherToken = host.tokens.issue({ taskId: 'other-task', username: 'profile_cancel' });
-  await host.protocol.handle({ message: { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'call-1' } }, authorization: `Bearer ${otherToken}` });
-  assert.equal(host.tokens.verify(`Bearer ${otherToken}`).taskId, 'other-task');
-  const notification = await host.protocol.handle({ message: { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'call-1' } }, authorization: `Bearer ${token}` });
+  await host.protocol.handle({ message: { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'call-1' } }, authorization: 'Bearer run-two' });
+  const notification = await host.protocol.handle({ message: { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'call-1' } }, authorization });
   assert.equal(notification, null);
   const reply = await call;
   assert.equal(reply.result.content[0].text, 'aborted');
 });
 
-test('HTTP door mints scoped tokens and serves JSON-RPC without a session cookie', async (t) => {
-  const { host } = setup();
+test('stdio JSON-RPC runs a read-only provider using one synthetic test-profile binding', async (t) => {
+  const profileId = 'synthetic_profile_160';
+  const bindingRef = 'test-only:profile-160:read';
+  const records = new Map([[`${profileId}:marker-1`, { label: 'fixture readback', revision: 3 }]]);
+  const credentials = new Map([['runner-scoped-test', testScope(profileId, 'task-160-test', 'run-160-test', ['fixture_read'])]]);
+  let host;
+  host = createHost({
+    providers: [{ id: 'test-provider', version: '1.0.0-test', tools: [{
+      name: 'fixture_read',
+      description: 'Read a synthetic profile fixture.',
+      inputSchema: { type: 'object', properties: { recordId: { type: 'string' } }, required: ['recordId'] },
+      requiredBindings: [bindingRef],
+      handler: async ({ recordId }, run) => {
+        if (run.bindings[bindingRef] !== `read:${profileId}`) throw new Error('wrong profile binding');
+        return records.get(`${run.profileId}:${recordId}`) || null;
+      },
+    }] }],
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: host.catalog.digest } : null;
+    },
+    resolveBindings: async ({ context, required }) => {
+      assert.equal(context.profileId, profileId);
+      assert.deepEqual(required, [bindingRef]);
+      return { [bindingRef]: `read:${profileId}` };
+    },
+  });
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const replies = new Map();
+  const waiters = new Map();
+  let text = '';
+  output.setEncoding('utf8');
+  output.on('data', (chunk) => {
+    text += chunk;
+    let newline;
+    while ((newline = text.indexOf('\n')) >= 0) {
+      const line = text.slice(0, newline);
+      text = text.slice(newline + 1);
+      const reply = JSON.parse(line);
+      replies.set(String(reply.id), reply);
+      waiters.get(String(reply.id))?.(reply);
+    }
+  });
+  const replyFor = (id) => replies.has(String(id)) ? Promise.resolve(replies.get(String(id))) : new Promise((resolve) => waiters.set(String(id), resolve));
+  host.attachStdio({ input, output, authorization: 'Bearer runner-scoped-test' });
+  t.after(() => { input.destroy(); output.destroy(); });
+
+  input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'offline-runner', version: 'test' } } })}\n`);
+  assert.equal((await replyFor(1)).result.serverInfo.name, 'trained-assist-mcp-host');
+  input.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+  input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`);
+  assert.deepEqual((await replyFor(2)).result.tools.map((tool) => tool.name), ['fixture_read']);
+  input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'fixture_read', arguments: { recordId: 'marker-1' } } })}\n`);
+  assert.deepEqual(JSON.parse((await replyFor(3)).result.content[0].text), { label: 'fixture readback', revision: 3 });
+  input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'unlisted_write', arguments: { recordId: 'marker-1' } } })}\n`);
+  const denied = await replyFor(4);
+  assert.equal(denied.result.isError, true);
+  assert.match(denied.result.content[0].text, /Unknown tool/);
+});
+
+test('HTTP door accepts injected per-run auth and exposes no token mint route', async (t) => {
+  const { host, authorization } = setup();
   const server = createServer((req, res) => host.httpHandler(req, res));
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const minted = await fetch(`${base}/mcp/token`, {
-    method: 'POST', headers: { authorization: `Bearer ${hostToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ taskId: 'task-http', username: 'profile_http' }),
-  });
-  assert.equal(minted.status, 200);
-  const { token, url } = await minted.json();
-  assert.equal(url, '/mcp');
-  const rpc = await fetch(`${base}${url}`, {
-    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+  const rpc = await fetch(`${base}/mcp`, {
+    method: 'POST', headers: { authorization, 'content-type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'read_marker', arguments: { marker: 'http' } } }),
   });
   assert.equal(rpc.status, 200);
   const reply = await rpc.json();
-  assert.equal(JSON.parse(reply.result.content[0].text).username, 'profile_http');
+  assert.equal(JSON.parse(reply.result.content[0].text).profileId, 'profile_a');
   const denied = await fetch(`${base}/mcp/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-  assert.equal(denied.status, 401);
+  assert.equal(denied.status, 404);
 });
 
 test('MCP notifications have no response and batch requests fail explicitly', async (t) => {
