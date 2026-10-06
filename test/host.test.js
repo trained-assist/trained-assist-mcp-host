@@ -253,6 +253,59 @@ test('Fetch adapter accepts Runner remote MCP scope headers and dispatches the r
   assert.equal((await host.fetchHandler(new Request('https://mcp.test/mcp/token', { method: 'POST', body: '{}' }))).status, 404);
 });
 
+test('test Worker separates CP discovery scope from Runner invocation scope', async () => {
+  const { default: worker } = await import('../src/worker.mjs');
+  const env = {
+    MCP_TEST_AUTH_TOKEN: 'test-only-secret',
+    MCP_TEST_PRINCIPAL_ID: 'integration-telegram-ux-v1',
+    MCP_TEST_EXPIRES_AT: new Date(Date.now() + 60_000).toISOString(),
+    MCP_TEST_GENERATION: '1',
+  };
+  const request = (headers, message) => worker.fetch(new Request('https://mcp.test/mcp', {
+    method: 'POST',
+    headers: { authorization: 'Bearer test-only-secret', 'content-type': 'application/json', ...headers },
+    body: JSON.stringify(message),
+  }), env);
+  const baseScope = { 'x-mcp-user-task-id': 'task-160', 'x-mcp-profile': 'integration-telegram-ux-v1' };
+
+  const discovery = await request({
+    ...baseScope,
+    'x-mcp-operation': 'discovery',
+    'x-mcp-generation': '1',
+    'x-mcp-principal-id': 'integration-telegram-ux-v1',
+  }, { jsonrpc: '2.0', id: 'catalogue-1', method: 'tools/list' });
+  assert.equal(discovery.status, 200);
+  assert.deepEqual((await discovery.json()).result.tools.map((tool) => tool.name), ['registry.fixture_read']);
+
+  const discoveryCall = await request({
+    ...baseScope,
+    'x-mcp-operation': 'discovery',
+    'x-mcp-generation': '1',
+    'x-mcp-principal-id': 'integration-telegram-ux-v1',
+  }, { jsonrpc: '2.0', id: 'bad-discovery-call', method: 'tools/call', params: { name: 'registry.fixture_read' } });
+  assert.equal((await discoveryCall.json()).error.code, -32001);
+
+  const invocation = await request({
+    ...baseScope,
+    'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef',
+  }, { jsonrpc: '2.0', id: 'run-call', method: 'tools/call', params: { name: 'registry.fixture_read' } });
+  assert.equal(invocation.status, 200);
+  assert.deepEqual(JSON.parse((await invocation.json()).result.content[0].text), {
+    marker: 'registry-fixture-marker-160-v1',
+    profileId: 'integration-telegram-ux-v1',
+    taskId: 'task-160',
+    runId: 'run_01234567-89ab-cdef-0123-456789abcdef',
+  });
+
+  const wrongPrincipal = await request({
+    ...baseScope,
+    'x-mcp-operation': 'discovery',
+    'x-mcp-generation': '1',
+    'x-mcp-principal-id': 'another-principal',
+  }, { jsonrpc: '2.0', id: 'wrong-principal', method: 'tools/list' });
+  assert.equal((await wrongPrincipal.json()).error.code, -32001);
+});
+
 test('MCP notifications have no response and batch requests fail explicitly', async (t) => {
   const { host, authorization } = setup();
   const server = createServer((req, res) => host.httpHandler(req, res));

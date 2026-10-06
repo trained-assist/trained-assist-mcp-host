@@ -58,16 +58,28 @@ function hostFor(env) {
       }],
     }],
     audience,
-    authenticate: async ({ authorization, headers }) => {
+    authenticate: async ({ authorization, headers, method }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
       if (!match || !await sameSecret(match[1], env.MCP_TEST_AUTH_TOKEN)) return null;
       const taskId = headers?.get?.('x-mcp-user-task-id') || '';
-      const runId = headers?.get?.('x-mcp-run-id') || '';
       const requestProfileId = headers?.get?.('x-mcp-profile') || '';
-      if (!taskId || taskId.length > 200 || !/^run_[a-f0-9-]{36}$/.test(runId) || requestProfileId !== profileId) return null;
+      const requestedOperation = headers?.get?.('x-mcp-operation') || '';
+      const generation = Number(env.MCP_TEST_GENERATION || 1);
+      if (!taskId || taskId.length > 200 || requestProfileId !== profileId) return null;
+      let runId;
+      if (requestedOperation === 'discovery') {
+        const requestGeneration = Number(headers?.get?.('x-mcp-generation'));
+        const requestPrincipalId = headers?.get?.('x-mcp-principal-id') || '';
+        if (method !== 'tools/list' || requestGeneration !== generation || requestPrincipalId !== env.MCP_TEST_PRINCIPAL_ID) return null;
+        runId = `discovery:${taskId}:${generation}`;
+      } else {
+        if (requestedOperation && requestedOperation !== 'invocation') return null;
+        runId = headers?.get?.('x-mcp-run-id') || '';
+        if (!/^run_[a-f0-9-]{36}$/.test(runId)) return null;
+      }
       return {
         taskId,
-        generation: Number(env.MCP_TEST_GENERATION || 1),
+        generation,
         profileId,
         principalId: env.MCP_TEST_PRINCIPAL_ID,
         runId,

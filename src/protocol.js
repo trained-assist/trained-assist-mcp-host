@@ -8,9 +8,9 @@ function error(id, code, message) { return { jsonrpc: '2.0', id: id ?? null, err
 
 function createProtocol({ catalog, authenticate = async () => null, authorize = async () => true, resolveBindings = async () => ({}), audience, now = Date.now, timeoutMs = 45_000 }) {
   const pending = new Map();
-  async function runScope(authorization, headers) {
+  async function runScope(authorization, headers, method) {
     let scope;
-    try { scope = await authenticate({ authorization, headers }); }
+    try { scope = await authenticate({ authorization, headers, method }); }
     catch { return null; }
     if (!scope || typeof scope.profileId !== 'string' || !scope.profileId
         || typeof scope.taskId !== 'string' || !scope.taskId
@@ -47,7 +47,7 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
     }
     const { id, method } = message;
     if (method === 'notifications/cancelled') {
-      const scope = await runScope(authorization, headers);
+      const scope = await runScope(authorization, headers, method);
       const targetId = message.params && message.params.requestId;
       const active = pending.get(String(targetId));
       if (scope && active && active.runId === scope.runId) {
@@ -62,13 +62,13 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
     }
     if (method === 'ping') return result(id, {});
     if (method === 'tools/list') {
-      const scope = await runScope(authorization, headers);
+      const scope = await runScope(authorization, headers, method);
       if (!scope) return error(id, -32001, 'Unauthorized');
       return result(id, { tools: catalog.list(scope.allowedTools) });
     }
     if (method !== 'tools/call') return error(id, -32601, `Method not found: ${method}`);
 
-    const scope = await runScope(authorization, headers);
+    const scope = await runScope(authorization, headers, method);
     if (!scope) return error(id, -32001, 'Unauthorized');
     const params = message.params || {};
     if (typeof params.name !== 'string' || !params.name) return error(id, -32602, 'tools/call requires params.name');
