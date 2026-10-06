@@ -2,7 +2,7 @@
 
 Standalone MCP host runtime for Trained Assist providers. It owns transport adapters, tool catalog composition, per-call authorization, binding resolution, and bounded dispatch. Domain handlers remain in their owning repositories and are injected as provider adapters.
 
-This repository has no runtime dependency on `trained-assist-agent`, its runner, Telegram, prompt assembly, Task Store, scheduler, or profile storage. It has no production provider configured yet. The first PR establishes the executable host contract; provider adapters and consumer migrations are separate follow-up PRs pinned to released versions.
+This repository has no runtime dependency on `trained-assist-agent`, its runner, Telegram, prompt assembly, Task Store, scheduler, or profile storage. It has no production provider configured. The test Worker entrypoint below is a separate hard-scoped read-only fixture for the first CP→Runner integration slice.
 
 ## Runtime
 
@@ -37,6 +37,12 @@ Mount `host.httpHandler` on a Node HTTP server only when an owning runner provid
 ### stdio
 
 `host.attachStdio({ authorization })` uses the same dispatcher and protocol. The embedding launcher provides its per-run credential through a trusted channel. The host writes protocol responses to stdout; provider logs belong on stderr.
+
+### Isolated test Worker
+
+`wrangler.jsonc` deploys only `trained-assist-mcp-host-test-160` on its `workers.dev` URL. It has no custom route, service binding, or production provider. Until all `MCP_TEST_*` fields are configured it returns `503`; when configured it exposes exactly `registry.fixture_read` for the configured profile and principal. Requests must carry the Runner v1 scope headers `X-MCP-User-Task-Id`, `X-MCP-Profile`, and `X-MCP-Run-Id` plus a test-only opaque Bearer binding. The Worker pins policy version, expiry, audience, and host catalog digest on every call. Put `MCP_TEST_AUTH_TOKEN` in the test Worker secret store and matching Runner test binding through each owner's trusted config path; never put it in RunSpec, prompt text, issue comments, or manifests. No token mint endpoint is provided.
+
+Pinned test contract: server `trained-assist-registry-test`, binding `registry-mcp-test-160-read`, profile `integration-telegram-ux-v1`, tool `registry.fixture_read`, policy `registry-fixture-policy-v1`, audience `trained-assist:registry-mcp:test`, catalog digest computed from the pinned fixture provider, marker `registry-fixture-marker-160-v1`. Required Worker vars/secrets: `MCP_TEST_AUTH_TOKEN` (secret), `MCP_TEST_PRINCIPAL_ID`, and `MCP_TEST_EXPIRES_AT` (ISO 8601); `MCP_TEST_GENERATION` is optional and defaults to `1`. The marker is controlled fixture data, not production Registry data.
 
 ## Provider boundary
 

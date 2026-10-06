@@ -8,7 +8,7 @@
   "type": "commonjs",
   "engines": { "node": ">=22" },
   "scripts": {
-    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/stdio.js",
+    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs",
     "test": "node --test"
   }
 }

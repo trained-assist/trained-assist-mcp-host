@@ -3,6 +3,7 @@
 const { createCatalog } = require('./catalog');
 const { createProtocol } = require('./protocol');
 const { createHttpHandler } = require('./http');
+const { createFetchHandler } = require('./fetch');
 const { attachStdio } = require('./stdio');
 
 function createHost({ providers = [], authenticate, authorize, resolveBindings, audience, now, timeoutMs } = {}) {
@@ -12,6 +13,7 @@ function createHost({ providers = [], authenticate, authorize, resolveBindings, 
     catalog,
     protocol,
     httpHandler: createHttpHandler({ protocol }),
+    fetchHandler: createFetchHandler({ protocol }),
     attachStdio: (options) => attachStdio(protocol, options),
   };
 }

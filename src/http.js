@@ -28,7 +28,7 @@ function createHttpHandler({ protocol }) {
     try { message = await readJson(req); }
     catch (err) { return send(res, err.statusCode || 400, { error: err.message }); }
     if (Array.isArray(message)) return send(res, 200, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Batch requests are not supported' } });
-    const reply = await protocol.handle({ message, authorization: req.headers.authorization });
+    const reply = await protocol.handle({ message, authorization: req.headers.authorization, headers: req.headers });
     if (!reply) {
       res.writeHead(202);
       return res.end();

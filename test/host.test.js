@@ -217,6 +217,42 @@ test('HTTP door accepts injected per-run auth and exposes no token mint route', 
   assert.equal(denied.status, 404);
 });
 
+test('Fetch adapter accepts Runner remote MCP scope headers and dispatches the read-only tool', async () => {
+  const seen = [];
+  const { host, authorization } = setup({
+    authenticate: async ({ authorization: supplied, headers }) => {
+      seen.push({ supplied, taskId: headers.get('x-mcp-user-task-id'), profileId: headers.get('x-mcp-profile'), runId: headers.get('x-mcp-run-id') });
+      const scope = testScope(headers.get('x-mcp-profile'), headers.get('x-mcp-user-task-id'), headers.get('x-mcp-run-id'));
+      return supplied === authorization ? { ...scope, registryDigest: host.catalog.digest } : null;
+    },
+  });
+  const response = await host.fetchHandler(new Request('https://mcp.test/mcp', {
+    method: 'POST',
+    headers: {
+      authorization,
+      'content-type': 'application/json',
+      'x-mcp-user-task-id': 'task-160',
+      'x-mcp-profile': 'profile_a',
+      'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'read_marker', arguments: { marker: 'fetch-runtime' } } }),
+  }));
+  assert.equal(response.status, 200);
+  const reply = await response.json();
+  assert.deepEqual(JSON.parse(reply.result.content[0].text), {
+    marker: 'fetch-runtime',
+    profileId: 'profile_a',
+    taskId: 'task-160',
+  });
+  assert.deepEqual(seen[0], {
+    supplied: authorization,
+    taskId: 'task-160',
+    profileId: 'profile_a',
+    runId: 'run_01234567-89ab-cdef-0123-456789abcdef',
+  });
+  assert.equal((await host.fetchHandler(new Request('https://mcp.test/mcp/token', { method: 'POST', body: '{}' }))).status, 404);
+});
+
 test('MCP notifications have no response and batch requests fail explicitly', async (t) => {
   const { host, authorization } = setup();
   const server = createServer((req, res) => host.httpHandler(req, res));
