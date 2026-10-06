@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Runtime dependency boundary
+        run: |
+          node -e "const p=require('./package.json'); if(Object.keys(p.dependencies||{}).length) process.exit(1)"
+          if rg -n "trained-assist-agent|src/server|runner/|system-prompt|telegram" src; then
+            echo "Legacy agent runtime dependency found in host source"
+            exit 1
+          fi
+      - run: npm pack --dry-run
