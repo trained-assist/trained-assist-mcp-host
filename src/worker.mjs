@@ -34,7 +34,11 @@ async function sameSecret(actual, expected) {
 
 function configured(env) {
   if (!required.every((key) => typeof env[key] === 'string' && env[key].trim())) return false;
-  try { JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK); } catch { return false; }
+  try {
+    const jwk = JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK);
+    if (!jwk || jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519'
+        || typeof jwk.x !== 'string' || !jwk.x || Object.hasOwn(jwk, 'd')) return false;
+  } catch { return false; }
   return Number.isFinite(Date.parse(env.MCP_TEST_EXPIRES_AT))
     && Number.isSafeInteger(Number(env.MCP_TEST_GENERATION || 1))
     && Number(env.MCP_TEST_GENERATION || 1) > 0;

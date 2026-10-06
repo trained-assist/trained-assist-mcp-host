@@ -288,6 +288,13 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
   const baseScope = { 'x-mcp-user-task-id': 'task-160', 'x-mcp-profile': 'integration-telegram-ux-v1' };
   let workerDigest;
 
+  const invalidKeyEnv = { ...env, MCP_TEST_RUNNER_PUBLIC_JWK: JSON.stringify({ ...publicJwk, d: 'private-material' }) };
+  const invalidKeyResponse = await worker.fetch(new Request('https://mcp.test/mcp', {
+    method: 'POST', headers: { authorization: 'Bearer test-only-secret', 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'invalid-jwk', method: 'tools/list' }),
+  }), invalidKeyEnv);
+  assert.equal(invalidKeyResponse.status, 503);
+
   const discovery = await request({
     ...baseScope,
     'x-mcp-operation': 'discovery',
