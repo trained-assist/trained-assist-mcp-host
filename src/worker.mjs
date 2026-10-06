@@ -62,11 +62,15 @@ async function verifyRunBinding(token, env, expected) {
   try {
     const header = JSON.parse(new TextDecoder().decode(decodePart(parts[0])));
     const claims = JSON.parse(new TextDecoder().decode(decodePart(parts[1])));
-    if (!header || Object.keys(header).sort().join(',') !== 'alg,typ' || header.alg !== 'EdDSA' || header.typ !== 'JWT') return null;
+    const headerKeys = header && Object.keys(header).sort().join(',');
+    const e2eKey = headerKeys === 'alg,kid,typ' && header.kid === 'sandbox-e2e-v1'
+      && env.MCP_TEST_E2E_ENABLED === 'true' && typeof env.MCP_TEST_E2E_PUBLIC_JWK === 'string';
+    if (!header || (headerKeys !== 'alg,typ' && !e2eKey) || header.alg !== 'EdDSA' || header.typ !== 'JWT') return null;
     const expectedClaims = ['allowedTools', 'aud', 'bindingRef', 'catalogueVersion', 'exp', 'iat', 'iss', 'policyVersion', 'principalId', 'profileId', 'registryDigest', 'runId', 'scope', 'serverId', 'sub', 'userTaskId'];
     if (!claims || typeof claims !== 'object' || Array.isArray(claims)
         || Object.keys(claims).sort().join(',') !== expectedClaims.sort().join(',')) return null;
-    const key = await crypto.subtle.importKey('jwk', JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK), { name: 'Ed25519' }, false, ['verify']);
+    const publicJwk = JSON.parse(e2eKey ? env.MCP_TEST_E2E_PUBLIC_JWK : env.MCP_TEST_RUNNER_PUBLIC_JWK);
+    const key = await crypto.subtle.importKey('jwk', publicJwk, { name: 'Ed25519' }, false, ['verify']);
     const valid = await crypto.subtle.verify({ name: 'Ed25519' }, key, decodePart(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
     if (!valid) return null;
     const now = Math.floor(Date.now() / 1000);

@@ -16,7 +16,9 @@
   "vars": {
     "MCP_TEST_PRINCIPAL_ID": "integration-telegram-ux-v1",
     "MCP_TEST_CATALOGUE_VERSION": "registry-fixture-catalogue-v1",
-    "MCP_TEST_EXPIRES_AT": "2026-10-06T17:30:00.000Z",
+    "MCP_TEST_EXPIRES_AT": "2026-10-14T23:59:59.000Z",
+    "MCP_TEST_E2E_ENABLED": "true",
+    "MCP_TEST_E2E_PUBLIC_JWK": "{\"crv\":\"Ed25519\",\"x\":\"agm1WRFRzSf7zvm1zTTEn9Jdd8WdFiYCIvn653oSozc\",\"kty\":\"OKP\"}",
     "MCP_TEST_RUNNER_PUBLIC_JWK": "{\"crv\":\"Ed25519\",\"x\":\"d4gXwZG0f4A-fKFhMUy5IgqWQhFXNz25ahfuARUZVm8\",\"kty\":\"OKP\"}"
   }
 }
