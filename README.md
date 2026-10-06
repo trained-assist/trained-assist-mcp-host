@@ -1,0 +1,60 @@
+# trained-assist-mcp-host
+
+Standalone MCP host runtime for Trained Assist providers. It owns transport adapters, tool catalog composition, per-call authorization, binding resolution, and bounded dispatch. Domain handlers remain in their owning repositories and are injected as provider adapters.
+
+This repository has no runtime dependency on `trained-assist-agent`, its runner, Telegram, prompt assembly, Task Store, scheduler, or profile storage. It has no production provider configured. The test Worker entrypoint below is a separate hard-scoped read-only fixture for the first CP→Runner integration slice.
+
+## Runtime
+
+Node.js 22 or newer; no third-party runtime dependencies.
+
+```js
+const { createHost } = require('trained-assist-mcp-host');
+
+const host = createHost({
+  providers: [{
+    id: 'example-domain',
+    version: '1.2.3',
+    tools: [{
+      name: 'example_read',
+      description: 'Read a domain resource.',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async (args, run) => domainAdapter.read(args, {
+        profileId: run.profileId,
+        taskId: run.taskId,
+      }),
+    }],
+  }],
+});
+```
+
+`createHost()` returns a shared MCP protocol dispatcher and HTTP and stdio adapters. The embedding runner supplies `authenticate({ authorization })` through its trusted per-run credential path. It must return `{ taskId, generation, profileId, principalId, runId, bindingRef, allowedTools, policyVersion, registryDigest, expiresAt, audience }`. The digest must match the host's pinned provider catalog; expiry and audience are checked on every operation. There is no token mint endpoint and no service-wide credential. Each provider needs a pinned `version` and declares stable MCP names, schemas, handlers, and optional `requiredBindings`. The host rejects duplicate names, filters `tools/list`, checks `allowedTools` again on each call, and runs `authorize({ context, tool })` for each call. Providers should observe the `AbortSignal` in context to stop work after cancellation or timeout.
+
+### HTTP
+
+Mount `host.httpHandler` on a Node HTTP server only when an owning runner provides the per-run authentication adapter and an explicitly scoped endpoint configuration. `POST /mcp` accepts one JSON-RPC request per request and supports `initialize`, `ping`, `tools/list`, `tools/call`, and cancellation notifications. There is no `/mcp/token` route. Notifications return HTTP 202 with an empty body. This library does not enable or deploy an endpoint on its own.
+
+### stdio
+
+`host.attachStdio({ authorization })` uses the same dispatcher and protocol. The embedding launcher provides its per-run credential through a trusted channel. The host writes protocol responses to stdout; provider logs belong on stderr.
+
+### Isolated test Worker
+
+`wrangler.jsonc` deploys only `trained-assist-mcp-host-test-160` on its `workers.dev` URL. It has no custom route, service binding, or production provider. Until the test secret and expiry are configured it returns `503`; when configured it exposes exactly `registry.fixture_read` for the pinned profile/principal. CP catalogue discovery sends `X-MCP-Operation: discovery`, `X-MCP-User-Task-Id`, `X-MCP-Generation`, `X-MCP-Profile`, and `X-MCP-Principal-Id`; discovery is restricted to `tools/list`. Runner invocation uses its v1 scope headers `X-MCP-User-Task-Id`, `X-MCP-Profile`, and canonical `X-MCP-Run-Id`. Both paths require the same test-only opaque Bearer binding. The Worker pins policy version, expiry, audience, and host catalog digest on every operation. Put `MCP_TEST_AUTH_TOKEN` in the test Worker secret store and matching CP/Runner test binding through each owner's trusted config path; never put it in RunSpec, prompt text, issue comments, or manifests. No token mint endpoint is provided.
+
+Pinned test contract: server `trained-assist-registry-test`, binding `registry-mcp-test-160-read`, profile `integration-telegram-ux-v1`, principal `integration-telegram-ux-v1`, tool `registry.fixture_read`, policy `registry-fixture-policy-v1`, audience `trained-assist:registry-mcp:test`, catalog digest computed from the pinned fixture provider, marker `registry-fixture-marker-160-v1`. The test principal is a nonsecret Wrangler var. Required secret/config values are `MCP_TEST_AUTH_TOKEN` (secret) and `MCP_TEST_EXPIRES_AT` (ISO 8601); `MCP_TEST_GENERATION` is optional and defaults to `1`. The marker is controlled fixture data, not production Registry data.
+
+## Provider boundary
+
+`resolveBindings({ context, providerId, required })` receives only the current run scope and the exact opaque binding refs declared by the provider. It returns values for the provider adapter; missing values fail closed. Values are not sent to the engine or returned in MCP results. The host must not receive the legacy service's full environment, read arbitrary profile files, or forward credentials through MCP arguments. Provider versions and manifests must be pinned by the deployment that composes the host. MCP stays unavailable unless an owning runner supplies an explicit scoped test or production binding configuration.
+
+Read-only providers should be integrated first. A mutating call with an unknown outcome must be reconciled by its owner and must not be retried against a legacy fallback.
+
+## Development
+
+```bash
+npm test
+npm run check
+```
+
+Offline tests use only in-memory providers and local HTTP fixtures. They do not prove live credentials, remote provider availability, deployment, or consumer cutover.

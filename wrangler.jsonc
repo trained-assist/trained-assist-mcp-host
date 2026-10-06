@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trained-assist-mcp-host-test-160",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-10-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "vars": {
+    "MCP_TEST_PRINCIPAL_ID": "integration-telegram-ux-v1"
+  }
+}
