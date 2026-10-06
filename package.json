@@ -3,12 +3,20 @@
   "version": "0.1.0",
   "private": false,
   "main": "src/index.js",
-  "files": ["src", "README.md"],
+  "files": [
+    "src",
+    "README.md"
+  ],
   "description": "Standalone MCP host for Trained Assist providers",
   "type": "commonjs",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs",
+    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs && node --check src/providers/search.js",
     "test": "node --test"
+  },
+  "dependencies": {
+    "trained-assist-search-skill": "git+https://github.com/trained-assist/trained-assist-search-skill.git#e8308ed23f9ad264753e119b7831d6f0737f8e15"
   }
 }

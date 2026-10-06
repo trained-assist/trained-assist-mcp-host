@@ -5,6 +5,7 @@ const { createProtocol } = require('./protocol');
 const { createHttpHandler } = require('./http');
 const { createFetchHandler } = require('./fetch');
 const { attachStdio } = require('./stdio');
+const { createSearchProvider } = require('./providers/search');
 
 function createHost({ providers = [], authenticate, authorize, resolveBindings, audience, now, timeoutMs } = {}) {
   const catalog = createCatalog(providers);
@@ -18,4 +19,4 @@ function createHost({ providers = [], authenticate, authorize, resolveBindings, 
   };
 }
 
-module.exports = { createHost };
+module.exports = { createHost, createSearchProvider };
