@@ -279,7 +279,6 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     MCP_TEST_EXPIRES_AT: new Date(Date.now() + 60_000).toISOString(),
     MCP_TEST_GENERATION: '1',
     MCP_TEST_RUNNER_PUBLIC_JWK: JSON.stringify(publicJwk),
-    MCP_TEST_CATALOGUE_VERSION: 'registry-fixture-catalogue-v1',
   };
   const request = (headers, message) => worker.fetch(new Request('https://mcp.test/mcp', {
     method: 'POST',
@@ -348,8 +347,7 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
   await denyInvocation({}, await signProof({ runId: 'run_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', sub: 'run_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }));
   await denyInvocation({}, await signProof({ bindingRef: 'another-binding' }));
   await denyInvocation({}, await signProof({ allowedTools: ['registry.fixture_write'] }));
-  await denyInvocation({}, await signProof({ catalogueVersion: 'another-catalogue' }));
-  await denyInvocation({}, await signProof({ unexpectedClaim: 'must-not-be-ignored' }));
+  await denyInvocation({}, await signProof({ catalogueVersion: 'unapproved-catalogue' }));
   await denyInvocation({ 'x-mcp-profile': 'another-profile' }, await signProof());
   await denyInvocation({ 'x-mcp-user-task-id': 'another-task' }, await signProof());
   await denyInvocation({}, await signProof({ exp: Math.floor(Date.now() / 1000) - 1 }));

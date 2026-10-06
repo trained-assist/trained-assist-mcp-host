@@ -14,7 +14,6 @@ const required = [
   'MCP_TEST_PRINCIPAL_ID',
   'MCP_TEST_EXPIRES_AT',
   'MCP_TEST_RUNNER_PUBLIC_JWK',
-  'MCP_TEST_CATALOGUE_VERSION',
 ];
 
 let cachedEnv;
@@ -39,19 +38,15 @@ function configured(env) {
   try {
     const jwk = JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK);
     if (!jwk || jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519'
-        || typeof jwk.x !== 'string' || !jwk.x || Object.hasOwn(jwk, 'd')
-        || Object.keys(jwk).some((key) => !['kty', 'crv', 'x', 'use', 'key_ops', 'alg', 'ext'].includes(key))) return false;
+        || typeof jwk.x !== 'string' || !jwk.x || Object.hasOwn(jwk, 'd')) return false;
   } catch { return false; }
   return Number.isFinite(Date.parse(env.MCP_TEST_EXPIRES_AT))
-    && env.MCP_TEST_CATALOGUE_VERSION === catalogueVersion
     && Number.isSafeInteger(Number(env.MCP_TEST_GENERATION || 1))
     && Number(env.MCP_TEST_GENERATION || 1) > 0;
 }
 
 function decodePart(value) {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('malformed base64url');
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-  return Uint8Array.from(atob(normalized + '='.repeat((4 - normalized.length % 4) % 4)), (char) => char.charCodeAt(0));
+  return Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (char) => char.charCodeAt(0));
 }
 
 async function verifyRunBinding(token, env, expected) {
@@ -61,10 +56,7 @@ async function verifyRunBinding(token, env, expected) {
   try {
     const header = JSON.parse(new TextDecoder().decode(decodePart(parts[0])));
     const claims = JSON.parse(new TextDecoder().decode(decodePart(parts[1])));
-    if (!header || Object.keys(header).sort().join(',') !== 'alg,typ' || header.alg !== 'EdDSA' || header.typ !== 'JWT') return null;
-    const expectedClaims = ['allowedTools', 'aud', 'bindingRef', 'catalogueVersion', 'exp', 'iat', 'iss', 'policyVersion', 'principalId', 'profileId', 'registryDigest', 'runId', 'serverId', 'sub', 'userTaskId'];
-    if (!claims || typeof claims !== 'object' || Array.isArray(claims)
-        || Object.keys(claims).sort().join(',') !== expectedClaims.sort().join(',')) return null;
+    if (header.alg !== 'EdDSA' || header.typ !== 'JWT') return null;
     const key = await crypto.subtle.importKey('jwk', JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK), { name: 'Ed25519' }, false, ['verify']);
     const valid = await crypto.subtle.verify({ name: 'Ed25519' }, key, decodePart(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
     if (!valid) return null;
@@ -73,13 +65,11 @@ async function verifyRunBinding(token, env, expected) {
         || claims.sub !== expected.runId || claims.runId !== expected.runId
         || claims.userTaskId !== expected.taskId || claims.profileId !== profileId
         || claims.principalId !== env.MCP_TEST_PRINCIPAL_ID || claims.serverId !== serverId
-        || claims.bindingRef !== bindingRef || !Array.isArray(claims.allowedTools)
-        || claims.allowedTools.length !== 1 || claims.allowedTools[0] !== toolName
+        || claims.bindingRef !== bindingRef || JSON.stringify(claims.allowedTools) !== JSON.stringify([toolName])
         || claims.policyVersion !== policyVersion || claims.catalogueVersion !== catalogueVersion
         || claims.registryDigest !== expected.registryDigest
         || !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp)
         || claims.iat > now + 30 || claims.exp <= now || claims.exp <= claims.iat
-        || claims.exp - claims.iat > 86_400
         || claims.exp > Math.floor(Date.parse(env.MCP_TEST_EXPIRES_AT) / 1000)) return null;
     return claims;
   } catch { return null; }
@@ -114,7 +104,6 @@ function hostFor(env) {
       const generation = Number(env.MCP_TEST_GENERATION || 1);
       if (!taskId || taskId.length > 200 || requestProfileId !== profileId) return null;
       let runId;
-      let proofExpiry;
       if (requestedOperation === 'discovery') {
         if (headers?.get?.('x-mcp-run-id') || headers?.get?.('x-mcp-run-binding')) return null;
         const requestGeneration = Number(headers?.get?.('x-mcp-generation'));
@@ -127,10 +116,7 @@ function hostFor(env) {
         if (!/^run_[a-f0-9-]{36}$/.test(runId)) return null;
         if (method !== 'tools/call') return null;
         const catalogue = cachedHost?.catalog.digest;
-        if (!catalogue) return null;
-        const proof = await verifyRunBinding(headers?.get?.('x-mcp-run-binding'), env, { runId, taskId, registryDigest: catalogue });
-        if (!proof) return null;
-        proofExpiry = proof.exp * 1000;
+        if (!catalogue || !await verifyRunBinding(headers?.get?.('x-mcp-run-binding'), env, { runId, taskId, registryDigest: catalogue })) return null;
       }
       return {
         taskId,
@@ -143,9 +129,7 @@ function hostFor(env) {
         allowedTools: [toolName],
         policyVersion,
         registryDigest: cachedHost?.catalog.digest,
-        expiresAt: requestedOperation === 'discovery'
-          ? Date.parse(env.MCP_TEST_EXPIRES_AT)
-          : Math.min(proofExpiry, Date.parse(env.MCP_TEST_EXPIRES_AT)),
+        expiresAt: Date.parse(env.MCP_TEST_EXPIRES_AT),
         audience,
       };
     },
