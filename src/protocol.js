@@ -12,11 +12,12 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
     let scope;
     try { scope = await authenticate({ authorization, headers, method }); }
     catch { return null; }
+    const discovery = scope?.operationId === 'discovery';
     if (!scope || typeof scope.profileId !== 'string' || !scope.profileId
         || typeof scope.taskId !== 'string' || !scope.taskId
         || !Number.isSafeInteger(scope.generation) || scope.generation < 1
         || typeof scope.principalId !== 'string' || !scope.principalId
-        || typeof scope.runId !== 'string' || !scope.runId
+        || (discovery ? (method !== 'tools/list' || scope.runId !== undefined) : (typeof scope.runId !== 'string' || !scope.runId))
         || typeof scope.bindingRef !== 'string' || !scope.bindingRef
         || typeof scope.policyVersion !== 'string' || !scope.policyVersion
         || scope.registryDigest !== catalog.digest
