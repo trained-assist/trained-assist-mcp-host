@@ -257,9 +257,11 @@ test('Fetch adapter accepts Runner remote MCP scope headers and dispatches the r
 test('test Worker separates CP discovery scope from Runner invocation scope', async () => {
   const { default: worker } = await import('../src/worker.mjs');
   const keyPair = await webcrypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const e2eKeyPair = await webcrypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
   const publicJwk = await webcrypto.subtle.exportKey('jwk', keyPair.publicKey);
+  const e2ePublicJwk = await webcrypto.subtle.exportKey('jwk', e2eKeyPair.publicKey);
   const b64 = (value) => Buffer.from(value).toString('base64url');
-  const signProof = async (overrides = {}) => {
+  const signProof = async (overrides = {}, signer = keyPair.privateKey) => {
     const now = Math.floor(Date.now() / 1000);
     const claims = {
       iss: 'trained-assist-agent-runner', aud: 'trained-assist:registry-mcp:test',
@@ -271,7 +273,7 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
       iat: now - 1, exp: now + 30, ...overrides,
     };
     const input = `${b64(JSON.stringify({ alg: 'EdDSA', typ: 'JWT' }))}.${b64(JSON.stringify(claims))}`;
-    return `${input}.${b64(await webcrypto.subtle.sign({ name: 'Ed25519' }, keyPair.privateKey, Buffer.from(input)))}`;
+    return `${input}.${b64(await webcrypto.subtle.sign({ name: 'Ed25519' }, signer, Buffer.from(input)))}`;
   };
   const env = {
     MCP_TEST_AUTH_TOKEN: 'test-only-secret',
@@ -279,13 +281,15 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     MCP_TEST_EXPIRES_AT: new Date(Date.now() + 60_000).toISOString(),
     MCP_TEST_GENERATION: '1',
     MCP_TEST_RUNNER_PUBLIC_JWK: JSON.stringify(publicJwk),
+    MCP_TEST_E2E_ENABLED: 'true',
+    MCP_TEST_E2E_PUBLIC_JWK: JSON.stringify(e2ePublicJwk),
     MCP_TEST_CATALOGUE_VERSION: 'registry-fixture-catalogue-v1',
   };
-  const request = (headers, message) => worker.fetch(new Request('https://mcp.test/mcp', {
+  const request = (headers, message, requestEnv = env) => worker.fetch(new Request('https://mcp.test/mcp', {
     method: 'POST',
     headers: { authorization: 'Bearer test-only-secret', 'content-type': 'application/json', ...headers },
     body: JSON.stringify(message),
-  }), env);
+  }), requestEnv);
   const baseScope = { 'x-mcp-user-task-id': 'task-160', 'x-mcp-profile': 'integration-telegram-ux-v1' };
   let workerDigest;
 
@@ -340,6 +344,25 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     taskId: 'task-160',
     runId: 'run_01234567-89ab-cdef-0123-456789abcdef',
   });
+
+  const e2eInvocation = await request({
+    ...baseScope,
+    'x-mcp-operation': 'invocation',
+    'x-mcp-scope': 'registry:fixture-read',
+    'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef',
+    'x-mcp-run-binding': await signProof({}, e2eKeyPair.privateKey),
+  }, { jsonrpc: '2.0', id: 'e2e-run-call', method: 'tools/call', params: { name: 'registry.fixture_read' } });
+  assert.equal(e2eInvocation.status, 200);
+  assert.equal(JSON.parse((await e2eInvocation.json()).result.content[0].text).marker, 'registry-fixture-marker-160-v1');
+
+  const e2eDisabledInvocation = await request({
+    ...baseScope,
+    'x-mcp-operation': 'invocation',
+    'x-mcp-scope': 'registry:fixture-read',
+    'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef',
+    'x-mcp-run-binding': await signProof({}, e2eKeyPair.privateKey),
+  }, { jsonrpc: '2.0', id: 'e2e-run-call-disabled', method: 'tools/call', params: { name: 'registry.fixture_read' } }, { ...env, MCP_TEST_E2E_ENABLED: 'false' });
+  assert.equal((await e2eDisabledInvocation.json()).error.code, -32001);
 
   const initialize = await request({}, { jsonrpc: '2.0', id: 'initialize', method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'fixture-client', version: '1' } } });
   assert.equal((await initialize.json()).result.protocolVersion, '2024-11-05');

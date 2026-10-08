@@ -38,10 +38,16 @@ async function sameSecret(actual, expected) {
 function configured(env) {
   if (!required.every((key) => typeof env[key] === 'string' && env[key].trim())) return false;
   try {
-    const jwk = JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK);
-    if (!jwk || jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519'
-        || typeof jwk.x !== 'string' || !jwk.x || Object.hasOwn(jwk, 'd')
-        || Object.keys(jwk).some((key) => !['kty', 'crv', 'x', 'use', 'key_ops', 'alg', 'ext'].includes(key))) return false;
+    const validPublicJwk = (value) => {
+      const jwk = JSON.parse(value);
+      return jwk && jwk.kty === 'OKP' && jwk.crv === 'Ed25519'
+        && typeof jwk.x === 'string' && jwk.x && !Object.hasOwn(jwk, 'd')
+        && !Object.keys(jwk).some((key) => !['kty', 'crv', 'x', 'use', 'key_ops', 'alg', 'ext'].includes(key));
+    };
+    if (!validPublicJwk(env.MCP_TEST_RUNNER_PUBLIC_JWK)) return false;
+    if (env.MCP_TEST_E2E_ENABLED === 'true'
+        && (!validPublicJwk(env.MCP_TEST_E2E_PUBLIC_JWK)
+          || JSON.parse(env.MCP_TEST_E2E_PUBLIC_JWK).x === JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK).x)) return false;
   } catch { return false; }
   return Number.isFinite(Date.parse(env.MCP_TEST_EXPIRES_AT))
     && env.MCP_TEST_CATALOGUE_VERSION === catalogueVersion
@@ -66,8 +72,18 @@ async function verifyRunBinding(token, env, expected) {
     const expectedClaims = ['allowedTools', 'aud', 'bindingRef', 'catalogueVersion', 'exp', 'iat', 'iss', 'policyVersion', 'principalId', 'profileId', 'registryDigest', 'runId', 'scope', 'serverId', 'sub', 'userTaskId'];
     if (!claims || typeof claims !== 'object' || Array.isArray(claims)
         || Object.keys(claims).sort().join(',') !== expectedClaims.sort().join(',')) return null;
-    const key = await crypto.subtle.importKey('jwk', JSON.parse(env.MCP_TEST_RUNNER_PUBLIC_JWK), { name: 'Ed25519' }, false, ['verify']);
-    const valid = await crypto.subtle.verify({ name: 'Ed25519' }, key, decodePart(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+    const signingInput = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const signature = decodePart(parts[2]);
+    const verificationKeys = [env.MCP_TEST_RUNNER_PUBLIC_JWK];
+    if (env.MCP_TEST_E2E_ENABLED === 'true') verificationKeys.push(env.MCP_TEST_E2E_PUBLIC_JWK);
+    let valid = false;
+    for (const jwk of verificationKeys) {
+      const key = await crypto.subtle.importKey('jwk', JSON.parse(jwk), { name: 'Ed25519' }, false, ['verify']);
+      if (await crypto.subtle.verify({ name: 'Ed25519' }, key, signature, signingInput)) {
+        valid = true;
+        break;
+      }
+    }
     if (!valid) return null;
     const now = Math.floor(Date.now() / 1000);
     if (claims.iss !== 'trained-assist-agent-runner' || claims.aud !== audience
