@@ -1,0 +1,30 @@
+name: Remote test Worker E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-host-test-worker-e2e
+  cancel-in-progress: false
+
+jobs:
+  remote-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate host source and local contract tests
+        run: npm run check && npm test
+      - name: Run read-only remote discovery and synthetic signed fixture invocation
+        env:
+          MCP_TEST_AUTH_TOKEN: ${{ secrets.MCP_TEST_AUTH_TOKEN }}
+          MCP_TEST_E2E_PRIVATE_JWK: ${{ secrets.MCP_TEST_E2E_PRIVATE_JWK }}
+        run: node scripts/remote-e2e.mjs
