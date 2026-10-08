@@ -78,7 +78,10 @@ const invocationList = await post({ jsonrpc: '2.0', id: invocationId, method: 't
 if (!invocationList.response.ok || invocationList.body?.jsonrpc !== '2.0' || invocationList.body?.id !== invocationId
     || !Array.isArray(invocationList.body?.result?.tools)
     || invocationList.body.result.tools.length !== 1 || invocationList.body.result.tools[0]?.name !== toolName) {
-  throw new Error(`Signed invocation listing failed (HTTP ${invocationList.response.status})`);
+  const errorCode = Number.isInteger(invocationList.body?.error?.code) ? invocationList.body.error.code : 'none';
+  const responseShape = invocationList.body?.error ? 'jsonrpc-error' : Array.isArray(invocationList.body?.result?.tools) ? 'tools-result' : 'other';
+  const idMatches = invocationList.body?.id === invocationId;
+  throw new Error(`Signed invocation listing failed (HTTP ${invocationList.response.status}, shape ${responseShape}, errorCode ${errorCode}, idMatches ${idMatches})`);
 }
 
 const callId = `${taskId}:call`;
