@@ -29,7 +29,7 @@ jobs:
         run: npm run check && npm test
       - name: Create a bounded test lease
         id: lease
-        run: echo "expires_at=$(date -u -d '+30 days' '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+        run: echo "expires_at=$(date -u -d '+30 days' '+%Y-%m-%dT23:59:59Z')" >> "$GITHUB_OUTPUT"
       - name: Deploy fixture Worker and credentials
         env:
           MCP_TEST_EXPIRES_AT: ${{ steps.lease.outputs.expires_at }}

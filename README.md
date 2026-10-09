@@ -54,7 +54,7 @@ Pinned test contract: server `trained-assist-registry-test`, binding `registry-m
 
 The manual GitHub Action **Remote test Worker E2E** calls only the fixed `workers.dev` test endpoint. It verifies CP-style authenticated `tools/list`, a synthetic EdDSA-bound read-only fixture invocation, and rejection of an expired proof using `MCP_TEST_AUTH_TOKEN` and `MCP_TEST_E2E_PRIVATE_JWK` Actions secrets. The fixture has no mutable external state. This component probe does not claim that a real CP task or installed Runner completed.
 
-The manual **Deploy Registry MCP test Worker** action deploys only this test Worker from `main`. Configure the `sandbox` GitHub environment with `CF_API_TOKEN`, `MCP_TEST_AUTH_TOKEN`, and the Runner's public Ed25519 JWK in `MCP_TEST_RUNNER_PUBLIC_JWK`. Each deployment renews the lease for 30 days; deploy the paired Runner Worker with the matching private JWK and bearer before running an agent scenario.
+The manual **Deploy Registry MCP test Worker** action deploys only this test Worker from `main`. Configure the `sandbox` GitHub environment with `CF_API_TOKEN`, `MCP_TEST_AUTH_TOKEN`, and the Runner's public Ed25519 JWK in `MCP_TEST_RUNNER_PUBLIC_JWK`. Each deployment renews the lease through the end of the UTC day 30 days ahead; deploy the paired Runner Worker on the same UTC date with the matching private JWK and bearer before running an agent scenario.
 
 ## Provider boundary
 
