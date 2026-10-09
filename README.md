@@ -54,6 +54,8 @@ Pinned test contract: server `trained-assist-registry-test`, binding `registry-m
 
 The manual GitHub Action **Remote test Worker E2E** calls only the fixed `workers.dev` test endpoint. It verifies CP-style authenticated `tools/list`, a synthetic EdDSA-bound read-only fixture invocation, and rejection of an expired proof using `MCP_TEST_AUTH_TOKEN` and `MCP_TEST_E2E_PRIVATE_JWK` Actions secrets. The fixture has no mutable external state. This component probe does not claim that a real CP task or installed Runner completed.
 
+The manual **Deploy Registry MCP test Worker** action deploys only this test Worker from `main`. Configure the `sandbox` GitHub environment with `CF_API_TOKEN`, `MCP_TEST_AUTH_TOKEN`, and the Runner's public Ed25519 JWK in `MCP_TEST_RUNNER_PUBLIC_JWK`. Each deployment renews the lease for 30 days; deploy the paired Runner Worker with the matching private JWK and bearer before running an agent scenario.
+
 ## Provider boundary
 
 `resolveBindings({ context, providerId, required })` receives only the current run scope and the exact opaque binding refs declared by the provider. It returns values for the provider adapter; missing values fail closed. Values are not sent to the engine or returned in MCP results. The host must not receive the legacy service's full environment, read arbitrary profile files, or forward credentials through MCP arguments. Provider versions and manifests must be pinned by the deployment that composes the host. MCP stays unavailable unless an owning runner supplies an explicit scoped test or production binding configuration.

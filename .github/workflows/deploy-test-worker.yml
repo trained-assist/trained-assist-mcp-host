@@ -1,0 +1,43 @@
+name: Deploy Registry MCP test Worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-mcp-test-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: sandbox
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      MCP_TEST_AUTH_TOKEN: ${{ secrets.MCP_TEST_AUTH_TOKEN }}
+      MCP_TEST_RUNNER_PUBLIC_JWK: ${{ secrets.MCP_TEST_RUNNER_PUBLIC_JWK }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate and test the pinned fixture Worker
+        run: npm run check && npm test
+      - name: Create a bounded test lease
+        id: lease
+        run: echo "expires_at=$(date -u -d '+30 days' '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+      - name: Deploy fixture Worker and credentials
+        env:
+          MCP_TEST_EXPIRES_AT: ${{ steps.lease.outputs.expires_at }}
+        run: |
+          test -n "$MCP_TEST_AUTH_TOKEN"
+          test -n "$MCP_TEST_RUNNER_PUBLIC_JWK"
+          node -e 'const k=JSON.parse(process.env.MCP_TEST_RUNNER_PUBLIC_JWK); if(k.kty!=="OKP"||k.crv!=="Ed25519"||!k.x||k.d)process.exit(1)'
+          printf '%s\n' "$MCP_TEST_AUTH_TOKEN" | npx --yes wrangler@4.146.0 secret put MCP_TEST_AUTH_TOKEN --config wrangler.jsonc
+          npx --yes wrangler@4.146.0 deploy --config wrangler.jsonc \
+            --var "MCP_TEST_EXPIRES_AT:$MCP_TEST_EXPIRES_AT" \
+            --var "MCP_TEST_RUNNER_PUBLIC_JWK:$MCP_TEST_RUNNER_PUBLIC_JWK"
