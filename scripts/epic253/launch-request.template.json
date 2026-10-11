@@ -1,0 +1,7 @@
+{
+  "path": "<test-project-path-under-$HOME>",
+  "agent": "opencode",
+  "message": "Ты проверяешь MCP для Epic #253. test_run_id=<test_run_id>. Среда=local fixture MCP (http://127.0.0.1:8731/mcp). Разрешён только server=fixture, tool=fixture.echo, args={\"nonce\":\"<test_run_id>-echo-001\"}. Используй именно нативный подключённый MCP tool. Не выполняй его через shell, curl, web fetch или поддельный ответ. Не читай файлы ключей, не печатай credentials, не меняй config/код/облако. При отсутствии инструмента сообщи TOOL_NOT_VISIBLE. Вызови tool один раз; при неясном исходе не повторяй автоматически. Сообщи имя вызванного tool, полученный nonce/result и ошибку, если есть. Не запускай других агентов. После результата закончи ответ.",
+  "worktree": false,
+  "model": "master"
+}

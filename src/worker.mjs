@@ -1,6 +1,8 @@
 import hostModule from './index.js';
+import identityModule from './identity.js';
 
 const { createHost } = hostModule;
+const { initTables, createUser, issueApiKey, revokeApiKey, verifyKey } = identityModule;
 const serverId = 'trained-assist-registry-test';
 const toolName = 'registry.fixture_read';
 const audience = 'trained-assist:registry-mcp:test';
@@ -174,8 +176,15 @@ function hostFor(env) {
     },
   });
   cachedEnv = env;
+  // I00.a.1: Initialize D1 identity tables when D1 binding is present
+  initTables();
+
   return cachedHost;
 }
+
+// I00.a.1: Export identity management functions for CLI/admin
+// These are used by account provisioning (I01.a/I01.b)
+export { initTables, createUser, issueApiKey, revokeApiKey, verifyKey };
 
 export default {
   async fetch(request, env) {
