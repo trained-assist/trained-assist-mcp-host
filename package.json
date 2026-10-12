@@ -15,7 +15,7 @@
   "type": "commonjs",
   "engines": { "node": ">=22" },
   "scripts": {
-    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs && node --check src/worker-human.mjs && node --check src/worker-unified.mjs && node --check src/human.js && node --check src/identity.js && node --check test/helpers/fake-d1.js && node --check test/human-identity.test.js",
+    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs && node --check src/worker-human.mjs && node --check src/worker-unified.mjs && node --check src/human.js && node --check src/identity.js && node --check test/helpers/fake-d1.js && node --check test/human-identity.test.js && node --check scripts/seed-identity-test-users.mjs",
     "test": "node --test"
   }
 }
