@@ -6,14 +6,16 @@
   "exports": {
     ".": "./src/index.js",
     "./protocol": "./src/protocol.js",
-    "./catalog": "./src/catalog.js"
+    "./catalog": "./src/catalog.js",
+    "./human": "./src/human.js",
+    "./identity": "./src/identity.js"
   },
   "files": ["src", "README.md"],
   "description": "Standalone MCP host for Trained Assist providers",
   "type": "commonjs",
   "engines": { "node": ">=22" },
   "scripts": {
-    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs",
+    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs && node --check src/worker-human.mjs && node --check src/human.js && node --check src/identity.js && node --check test/helpers/fake-d1.js && node --check test/human-identity.test.js",
     "test": "node --test"
   }
 }

@@ -39,10 +39,11 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
       bindingRef: scope.bindingRef,
       policyVersion: scope.policyVersion,
       registryDigest: scope.registryDigest,
-      audience: scope.audience,
+    audience: scope.audience,
       expiresAt: scope.expiresAt,
       operationId,
       allowedTools: [...scope.allowedTools],
+      ...(scope.identity && { identity: Object.freeze({ ...scope.identity }) }),
     });
   }
 

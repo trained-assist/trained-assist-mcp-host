@@ -1,0 +1,45 @@
+import hostModule from './index.js';
+import identityModule from './identity.js';
+import humanModule from './human.js';
+
+const { createHost } = hostModule;
+const { initTables, createUser, issueApiKey, revokeApiKey, verifyKey, setUserStatus } = identityModule;
+const { createHumanProvider, humanScope, HUMAN_SERVICE, HUMAN_AUDIENCE } = humanModule;
+
+const audience = HUMAN_AUDIENCE;
+
+let cachedHumanHost = null;
+
+function humanHostFor(env) {
+  if (cachedHumanHost && cachedHumanHost.env === env) return cachedHumanHost.host;
+  const host = createHost({
+    providers: [createHumanProvider()],
+    audience,
+    authenticate: async ({ authorization }) => {
+      const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
+      if (!match) return null;
+      const human = await verifyKey(env, match[1], { service: HUMAN_SERVICE });
+      return human ? humanScope(human, host.catalog.digest) : null;
+    },
+  });
+  cachedHumanHost = { host, env };
+  initTables();
+  return host;
+}
+
+export { initTables, createUser, issueApiKey, revokeApiKey, verifyKey, setUserStatus };
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === '/mcp') {
+      if (!configured(env)) return new Response('human MCP binding is not configured', { status: 503 });
+      return humanHostFor(env).fetchHandler(request);
+    }
+    return new Response('not found', { status: 404 });
+  },
+};
+
+function configured(env) {
+  return typeof env.MCP_IDENTITY_DB === 'object' && env.MCP_IDENTITY_DB !== null;
+}
