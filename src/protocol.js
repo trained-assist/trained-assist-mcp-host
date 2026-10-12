@@ -8,7 +8,6 @@ function error(id, code, message) { return { jsonrpc: '2.0', id: id ?? null, err
 
 function createProtocol({ catalog, authenticate = async () => null, authorize = async () => true, resolveBindings = async () => ({}), audience, now = Date.now, timeoutMs = 45_000 }) {
   const pendingSessions = new Map();
-
   function validateScope(scope, method) {
     if (!scope || typeof scope.profileId !== 'string' || !scope.profileId
         || typeof scope.taskId !== 'string' || !scope.taskId
@@ -46,6 +45,7 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
       allowedTools: [...scope.allowedTools],
     });
   }
+
 
   async function runScope(authorization, headers, method) {
     let scope;
