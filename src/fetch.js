@@ -32,6 +32,7 @@ function createFetchHandler({ protocol, maxBodyBytes = MAX_BODY_BYTES }) {
       message,
       authorization: request.headers.get('authorization'),
       headers: request.headers,
+      sessionId: request.headers.get('mcp-session-id'),
     });
     if (!reply) return new Response(null, { status: 202 });
     return Response.json(reply, { status: 200 });

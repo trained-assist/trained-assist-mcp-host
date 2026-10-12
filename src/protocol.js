@@ -7,7 +7,7 @@ function result(id, value) { return { jsonrpc: '2.0', id, result: value }; }
 function error(id, code, message) { return { jsonrpc: '2.0', id: id ?? null, error: { code, message } }; }
 
 function createProtocol({ catalog, authenticate = async () => null, authorize = async () => true, resolveBindings = async () => ({}), audience, now = Date.now, timeoutMs = 45_000 }) {
-  const pending = new Map();
+  const pendingSessions = new Map();
   async function runScope(authorization, headers, method) {
     let scope;
     try { scope = await authenticate({ authorization, headers, method }); }
@@ -41,16 +41,17 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
       allowedTools: [...scope.allowedTools],
     });
   }
-  async function handle({ message, authorization, headers }) {
+  async function handle({ message, authorization, headers, sessionId }) {
     if (!message || typeof message !== 'object' || Array.isArray(message)
         || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
       return error(message && message.id, -32600, 'Invalid Request');
     }
     const { id, method } = message;
+    const sessionKey = sessionId == null || sessionId === '' ? 'default' : String(sessionId);
     if (method === 'notifications/cancelled') {
       const scope = await runScope(authorization, headers, method);
       const targetId = message.params && message.params.requestId;
-      const active = pending.get(String(targetId));
+      const active = pendingSessions.get(sessionKey)?.get(String(targetId));
       if (scope && active && active.runId === scope.runId) {
         active.controller.abort(new Error('Request cancelled by client'));
       }
@@ -81,9 +82,14 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
     const args = params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments)
       ? params.arguments : {};
     const requestId = String(id);
-    if (pending.has(requestId)) return error(id, -32600, 'Request id is already active');
+    let sessionPending = pendingSessions.get(sessionKey);
+    if (!sessionPending) {
+      sessionPending = new Map();
+      pendingSessions.set(sessionKey, sessionPending);
+    }
+    if (sessionPending.has(requestId)) return error(id, -32600, 'Request id is already active');
     const controller = new AbortController();
-    pending.set(requestId, { controller, runId: scope.runId });
+    sessionPending.set(requestId, { controller, runId: scope.runId });
     const context = Object.freeze({ ...scope, providerId: tool.providerId, requestId, signal: controller.signal });
     try {
       if (!await authorize({ context, tool: { name: tool.name, providerId: tool.providerId } })) {
@@ -112,7 +118,8 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
     } catch (err) {
       return result(id, { content: [{ type: 'text', text: String(err && err.message || 'Tool failed') }], isError: true });
     } finally {
-      pending.delete(requestId);
+      sessionPending.delete(requestId);
+      if (sessionPending.size === 0) pendingSessions.delete(sessionKey);
     }
   }
 
