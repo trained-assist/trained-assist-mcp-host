@@ -620,3 +620,49 @@ test('machine vectors still pass after user scope addition', async () => {
     taskId: 'task-a',
   });
 });
+
+test('Two sessions of one key run ID=1 concurrently and foreign cancel has no effect', async () => {
+  let host;
+  host = createHost({
+    providers: [{ id: 'cancel', version: '1.0.0-test', tools: [{ name: 'wait', handler: (_args, context) => new Promise((resolve) => {
+      context.signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+      setTimeout(() => resolve('completed'), 2_000);
+    }) }] }],
+    audience: testAudience,
+    authenticate: async ({ headers }) => {
+      const session = String((headers && headers['mcp-session-id']) || 'anon');
+      return {
+        taskId: 'task-1', generation: 1, profileId: 'profile_a',
+        principalId: 'principal:shared-key', runId: 'run-shared',
+        bindingRef: `binding:${session}`, policyVersion: 'p1',
+        registryDigest: host.catalog.digest, audience: testAudience,
+        expiresAt: Date.now() + 60_000, operationId: 'invocation',
+        allowedTools: ['wait'],
+      };
+    },
+  });
+  const call = (sessionId) => host.protocol.handle({
+    message: { jsonrpc: '2.0', id: '1', method: 'tools/call', params: { name: 'wait' } },
+    authorization: 'Bearer shared-key',
+    headers: { 'mcp-session-id': sessionId },
+    sessionId,
+  });
+  const cancel = (sessionId, targetId) => host.protocol.handle({
+    message: { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: targetId } },
+    authorization: 'Bearer shared-key',
+    headers: { 'mcp-session-id': sessionId },
+    sessionId,
+  });
+
+  const a = call('session-a');
+  await new Promise((resolve) => setImmediate(resolve));
+  const b = call('session-b');
+  assert.equal(b.error, undefined, 'second session ID=1 must be accepted');
+
+  const foreignCancel = await cancel('session-a', '1');
+  assert.equal(foreignCancel, null, 'cancel notification has no response');
+  const replyA = await a;
+  assert.equal(replyA.result.content[0].text, 'aborted', 'own-session cancel must abort own request');
+  const replyB = await b;
+  assert.equal(replyB.result.content[0].text, 'completed', 'foreign cancel must not affect other session');
+});
