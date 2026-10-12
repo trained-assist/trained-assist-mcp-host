@@ -12,6 +12,7 @@
 
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 const port = Number(process.env.PROXY_PORT || 8732);
 const upstream = process.env.UPSTREAM_URL || 'https://trained-assist-mcp-host-identity.skillset-apply.workers.dev/mcp';
@@ -28,26 +29,44 @@ const server = createServer(async (req, res) => {
   for await (const chunk of req) chunks.push(chunk);
   const body = Buffer.concat(chunks);
 
-  const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${key}` };
+  const headers = {
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+    authorization: `Bearer ${key}`,
+    'accept-encoding': 'identity'
+  };
   const sessionHeader = req.headers['mcp-session-id'];
   if (sessionHeader) headers['mcp-session-id'] = String(sessionHeader);
 
-  const upstreamResponse = await fetch(upstream, { method: 'POST', headers, body });
-  const text = await upstreamResponse.text();
-
-  let mcpMethod = 'unknown';
-  let mcpId = null;
-  let nonce = null;
   try {
-    const parsed = JSON.parse(text);
-    mcpMethod = parsed.method || `reply:${parsed.id}`;
-    mcpId = parsed.id ?? null;
-    nonce = parsed.params?.arguments?.nonce ?? null;
-  } catch {}
-  console.log(`proxy t=${Date.now()} mcp=${mcpMethod} id=${mcpId}${nonce ? ` nonce=${nonce}` : ''} upstream=${upstreamResponse.status}`);
+    const upstreamResponse = await fetch(upstream, { method: 'POST', headers, body });
 
-  res.writeHead(upstreamResponse.status, { 'content-type': upstreamResponse.headers.get('content-type') || 'application/json; charset=utf-8' });
-  res.end(text);
+    const contentType = upstreamResponse.headers.get('content-type') || 'application/json; charset=utf-8';
+    const contentEncoding = upstreamResponse.headers.get('content-encoding');
+    console.error(`[proxy] upstream content-encoding: ${contentEncoding || 'none'}`);
+
+    const rawBody = Buffer.from(await upstreamResponse.arrayBuffer());
+
+    let responseBody = rawBody;
+    if (contentEncoding === 'zstd') {
+      console.error('[proxy] decompressing zstd...');
+      responseBody = execFileSync('zstd', ['-d'], { input: rawBody, maxBuffer: 10 * 1024 * 1024 });
+    } else if (contentEncoding) {
+      console.error('[proxy] unknown encoding:', contentEncoding);
+    }
+
+    const finalContentType = contentType.includes('charset') ? contentType : contentType + '; charset=utf-8';
+    res.writeHead(upstreamResponse.status, {
+      'content-type': finalContentType,
+      'content-length': Buffer.byteLength(responseBody),
+      'cache-control': 'no-cache'
+    });
+    res.end(responseBody);
+  } catch (err) {
+    console.error('proxy error:', err);
+    res.writeHead(502, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'proxy error' }, id: null }));
+  }
 });
 
 server.listen(port, '127.0.0.1', () => {
