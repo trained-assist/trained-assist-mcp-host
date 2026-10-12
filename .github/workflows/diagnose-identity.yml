@@ -1,0 +1,42 @@
+name: Diagnose Identity D1
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Seed run id to inspect (e.g. 20261012-a)"
+        required: false
+        default: "20261012-a"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: List D1 databases
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          npx --yes wrangler@4.146.0 d1 list --json --config wrangler.identity.jsonc
+      - name: Query identity tables
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          db_id=$(npx --yes wrangler@4.146.0 d1 list --json --config wrangler.identity.jsonc 2>/dev/null \
+            | node -e "const s=require('fs').readFileSync(0,'utf8');try{const l=JSON.parse(s);const a=Array.isArray(l)?l:[l];const d=a.find(x=>x.name==='trained-assist-mcp-identity');process.stdout.write(d?d.uuid:'')}catch{}")
+          echo "Resolved database_id=$db_id"
+          node -e "const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('wrangler.identity.jsonc','utf8'));cfg.d1_databases[0].database_id=process.argv[1];fs.writeFileSync('wrangler.identity.jsonc',JSON.stringify(cfg,null,2))" "$db_id"
+          echo "=== identity_users ==="
+          npx --yes wrangler@4.146.0 d1 execute trained-assist-mcp-identity --remote --config wrangler.identity.jsonc --command "SELECT user_id, role, service, status FROM identity_users" || true
+          echo "=== identity_api_keys ==="
+          npx --yes wrangler@4.146.0 d1 execute trained-assist-mcp-identity --remote --config wrangler.identity.jsonc --command "SELECT key_hash, user_id, label, status, revoked_at FROM identity_api_keys" || true
