@@ -195,10 +195,64 @@ test('human worker fetch path serves tools/list and tools/call over HTTP', async
 });
 
 test('machine fixture worker catalog digest is unchanged by the human worker', async () => {
-  const { default: machineWorker, ...machineModule } = await import('../src/worker.mjs');
-  assert.equal(typeof machineWorker.fetch, 'function');
-  // The machine worker keeps its own pinned catalog (registry.fixture_read only).
-  assert.equal(typeof machineModule.verifyKey, 'function');
+  const { machineProvider } = await import('../src/worker.mjs');
+  const { createCatalog } = require('../src/catalog');
+  const digestBefore = createCatalog([machineProvider]).digest;
+
   const { default: humanWorker } = await import('../src/worker-human.mjs');
   assert.equal(typeof humanWorker.fetch, 'function');
+  const { createHumanProvider } = require('../src/human');
+  const humanCatalog = createCatalog([createHumanProvider()]);
+
+  const { machineProvider: machineAfter } = await import('../src/worker.mjs');
+  const digestAfter = createCatalog([machineAfter]).digest;
+  assert.equal(digestAfter, digestBefore);
+  assert.notEqual(humanCatalog.digest, digestBefore);
+});
+
+test('mode routing: personal key selects human, missing D1 selects machine', async () => {
+  const { resolveMode } = await import('../src/worker-unified.mjs');
+  const { host, env } = await setup();
+  await seedUser(env, { userId: 'user-rec', email: 'rec@example.com', role: 'recruiter' });
+  const { key } = await identity.issueApiKey(env, { userId: 'user-rec', label: 'rec-key' });
+  const humanReq = { headers: { get: (h) => (h.toLowerCase() === 'authorization' ? `Bearer ${key}` : null) } };
+  assert.equal(await resolveMode(humanReq, env), 'human');
+
+  const machineReq = { headers: { get: () => 'Bearer machine-token' } };
+  assert.equal(await resolveMode(machineReq, env), 'machine');
+  assert.equal(await resolveMode({ headers: { get: () => null } }, env), 'machine');
+  assert.equal(await resolveMode(machineReq, {}), 'machine');
+});
+
+test('machine token without required headers is denied', async () => {
+  const { default: machineWorker } = await import('../src/worker.mjs');
+  const machineEnv = {
+    MCP_TEST_AUTH_TOKEN: 'mtok',
+    MCP_TEST_PRINCIPAL_ID: 'integration-telegram-ux-v1',
+    MCP_TEST_EXPIRES_AT: '2100-01-01T00:00:00Z',
+    MCP_TEST_RUNNER_PUBLIC_JWK: JSON.stringify({ kty: 'OKP', crv: 'Ed25519', x: 'x' }),
+    MCP_TEST_CATALOGUE_VERSION: 'registry-fixture-catalogue-v1',
+  };
+  const initReq = new Request('https://example.test/mcp', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer mtok' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+  });
+  const initRes = await machineWorker.fetch(initReq, machineEnv);
+  const initBody = await initRes.json();
+  const sessionId = initBody.result?.sessionId || initBody.id;
+  assert.ok(sessionId, 'initialize establishes a session');
+
+  const callReq = new Request('https://example.test/mcp', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: 'Bearer mtok',
+      'mcp-session-id': String(sessionId),
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'registry.fixture_read', arguments: {} } }),
+  });
+  const callRes = await machineWorker.fetch(callReq, machineEnv);
+  const callBody = await callRes.json();
+  assert.equal(callBody.error?.code, -32001, 'invocation without run headers is denied');
 });

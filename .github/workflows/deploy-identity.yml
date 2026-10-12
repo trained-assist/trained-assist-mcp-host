@@ -1,0 +1,79 @@
+name: Deploy Identity Lane Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run only (validate config and migrations, no deploy)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-identity-lane
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: sandbox
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      MCP_TEST_AUTH_TOKEN: ${{ secrets.MCP_TEST_AUTH_TOKEN }}
+      MCP_TEST_RUNNER_PUBLIC_JWK: ${{ secrets.MCP_TEST_RUNNER_PUBLIC_JWK }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate and test
+        run: npm run check && npm test
+      - name: Resolve or create D1 database
+        id: d1
+        run: |
+          db_name="trained-assist-mcp-identity"
+          db_id=$(npx --yes wrangler@4.146.0 d1 list --json --config wrangler.identity.jsonc 2>/dev/null \
+            | node -e "const l=JSON.parse(require('fs').readFileSync(0,'utf8'));const d=l.find(x=>x.file_name==='$db_name'||x.name==='$db_name');process.stdout.write(d?d.uuid:'')")
+          if [ -z "$db_id" ]; then
+            db_id=$(npx --yes wrangler@4.146.0 d1 create "$db_name" --config wrangler.identity.jsonc --json \
+              | node -e "const r=JSON.parse(require('fs').readFileSync(0,'utf8'));const d=Array.isArray(r)?r[0]:r;process.stdout.write(d.uuid||d.database_id)")
+          fi
+          test -n "$db_id"
+          echo "database_id=$db_id" >> "$GITHUB_OUTPUT"
+      - name: Prepare config with real database id
+        run: |
+          node -e "
+            const fs = require('fs');
+            const cfg = JSON.parse(fs.readFileSync('wrangler.identity.jsonc','utf8'));
+            cfg.d1_databases[0].database_id = process.env.DB_ID;
+            fs.writeFileSync('wrangler.identity.jsonc', JSON.stringify(cfg, null, 2));
+          " 
+        env:
+          DB_ID: ${{ steps.d1.outputs.database_id }}
+      - name: Apply additive identity migrations
+        run: |
+          npx --yes wrangler@4.146.0 d1 migrations apply trained-assist-mcp-identity \
+            --config wrangler.identity.jsonc --remote
+      - name: Create bounded test lease
+        id: lease
+        run: echo "expires_at=$(date -u -d '+30 days' '+%Y-%m-%dT23:59:59Z')" >> "$GITHUB_OUTPUT"
+      - name: Deploy identity worker
+        env:
+          MCP_TEST_EXPIRES_AT: ${{ steps.lease.outputs.expires_at }}
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          test -n "$MCP_TEST_AUTH_TOKEN"
+          test -n "$MCP_TEST_RUNNER_PUBLIC_JWK"
+          node -e 'const k=JSON.parse(process.env.MCP_TEST_RUNNER_PUBLIC_JWK); if(k.kty!=="OKP"||k.crv!=="Ed25519"||!k.x||k.d)process.exit(1)'
+          printf '%s\n' "$MCP_TEST_AUTH_TOKEN" | npx --yes wrangler@4.146.0 secret put MCP_TEST_AUTH_TOKEN --config wrangler.identity.jsonc
+          npx --yes wrangler@4.146.0 deploy --config wrangler.identity.jsonc \
+            --var "MCP_TEST_EXPIRES_AT:$MCP_TEST_EXPIRES_AT" \
+            --var "MCP_TEST_RUNNER_PUBLIC_JWK:$MCP_TEST_RUNNER_PUBLIC_JWK"
+      - name: Dry run
+        if: ${{ inputs.dry_run }}
+        run: |
+          npx --yes wrangler@4.146.0 deploy --dry-run --config wrangler.identity.jsonc
