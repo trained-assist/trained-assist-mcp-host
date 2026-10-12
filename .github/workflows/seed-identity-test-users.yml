@@ -1,0 +1,61 @@
+name: Seed Identity Test Users
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Unique seed run id (a-z, 0-9, dashes; e.g. i05c-20261012-a)"
+        required: true
+        type: string
+      public_key_pem:
+        description: "RSA public key PEM; plaintext keys are sealed into the run log"
+        required: true
+        type: string
+      dry_run:
+        description: "Print SQL only, no D1 writes"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-identity-seed
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: sandbox
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve D1 database id
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          DB_NAME: trained-assist-mcp-identity
+        run: |
+          db_id=$(npx --yes wrangler@4.146.0 d1 list --json --config wrangler.identity.jsonc 2>/dev/null \
+            | node -e "const s=require('fs').readFileSync(0,'utf8');try{const l=JSON.parse(s);const a=Array.isArray(l)?l:[l];const d=a.find(x=>x.database_name===process.env.DB_NAME);if(d)process.stdout.write(d.database_id)}catch{}")
+          if [ -z "$db_id" ]; then
+            echo "D1 database $DB_NAME not found; run the Deploy Identity Lane Worker workflow first" >&2
+            exit 1
+          fi
+          node -e "const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('wrangler.identity.jsonc','utf8'));cfg.d1_databases[0].database_id=process.argv[1];fs.writeFileSync('wrangler.identity.jsonc',JSON.stringify(cfg,null,2))" "$db_id"
+          echo "Resolved database_id for $DB_NAME"
+      - name: Apply additive migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: npx --yes wrangler@4.146.0 d1 migrations apply trained-assist-mcp-identity --remote --config wrangler.identity.jsonc
+      - name: Seed synthetic users and personal keys
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          SEED_RUN_ID: ${{ inputs.run_id }}
+          SEED_PUBLIC_KEY_PEM: ${{ inputs.public_key_pem }}
+          SEED_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: node scripts/seed-identity-test-users.mjs
