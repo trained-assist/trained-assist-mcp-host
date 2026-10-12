@@ -32,15 +32,15 @@ jobs:
           node-version: '22'
       - name: Validate and test
         run: npm run check && npm test
-      - name: Resolve or create D1 database
+- name: Resolve or create D1 database
         id: d1
         run: |
           db_name="trained-assist-mcp-identity"
           db_id=$(npx --yes wrangler@4.146.0 d1 list --json --config wrangler.identity.jsonc 2>/dev/null \
-            | node -e "const l=JSON.parse(require('fs').readFileSync(0,'utf8'));const d=l.find(x=>x.file_name==='$db_name'||x.name==='$db_name');process.stdout.write(d?d.uuid:'')")
+            | node -e "const s=require('fs').readFileSync(0,'utf8');try{const l=JSON.parse(s);const a=Array.isArray(l)?l:[l];const d=a.find(x=>x.file_name==='$db_name'||x.name==='$db_name');process.stdout.write(d?d.uuid||d.database_id:'')}catch{}")
           if [ -z "$db_id" ]; then
-            db_id=$(npx --yes wrangler@4.146.0 d1 create "$db_name" --config wrangler.identity.jsonc --json \
-              | node -e "const r=JSON.parse(require('fs').readFileSync(0,'utf8'));const d=Array.isArray(r)?r[0]:r;process.stdout.write(d.uuid||d.database_id)")
+            db_id=$(npx --yes wrangler@4.146.0 d1 create "$db_name" --config wrangler.identity.jsonc 2>&1 \
+              | node -e "const s=require('fs').readFileSync(0,'utf8');const m=s.match(/database_id[\"'=\\s:]+([a-f0-9-]{36})/i)||s.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);process.stdout.write(m?m[1]:'')")
           fi
           test -n "$db_id"
           echo "database_id=$db_id" >> "$GITHUB_OUTPUT"
