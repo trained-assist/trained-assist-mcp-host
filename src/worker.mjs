@@ -105,25 +105,27 @@ async function verifyRunBinding(token, env, expected) {
   } catch { return null; }
 }
 
+export const machineProvider = {
+  id: 'registry-fixture',
+  version: '1.0.0-test',
+  tools: [{
+    name: toolName,
+    description: 'Read the pinned marker from the Registry MCP test fixture.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    requiredBindings: [bindingRef],
+    handler: async (_args, run) => {
+      if (run.profileId !== profileId || run.bindings[bindingRef] !== fixtureMarker) {
+        throw new Error('Test profile binding mismatch');
+      }
+      return { marker: fixtureMarker, profileId: run.profileId, taskId: run.taskId, runId: run.runId };
+    },
+  }],
+};
+
 function hostFor(env) {
   if (cachedHost && cachedEnv === env) return cachedHost;
   cachedHost = createHost({
-    providers: [{
-      id: 'registry-fixture',
-      version: '1.0.0-test',
-      tools: [{
-        name: toolName,
-        description: 'Read the pinned marker from the Registry MCP test fixture.',
-        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-        requiredBindings: [bindingRef],
-        handler: async (_args, run) => {
-          if (run.profileId !== profileId || run.bindings[bindingRef] !== fixtureMarker) {
-            throw new Error('Test profile binding mismatch');
-          }
-          return { marker: fixtureMarker, profileId: run.profileId, taskId: run.taskId, runId: run.runId };
-        },
-      }],
-    }],
+    providers: [machineProvider],
     audience,
     authenticate: async ({ authorization, headers, method }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
