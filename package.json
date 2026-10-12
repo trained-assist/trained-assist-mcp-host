@@ -1,8 +1,13 @@
 {
   "name": "trained-assist-mcp-host",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./protocol": "./src/protocol.js",
+    "./catalog": "./src/catalog.js"
+  },
   "files": ["src", "README.md"],
   "description": "Standalone MCP host for Trained Assist providers",
   "type": "commonjs",

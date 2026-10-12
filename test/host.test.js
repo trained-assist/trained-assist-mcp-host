@@ -421,6 +421,206 @@ test('MCP notifications have no response and batch requests fail explicitly', as
   assert.equal((await batch.json()).error.code, -32600);
 });
 
+test('user scope accepts tools/list and tools/call with valid runId', async () => {
+  const credentials = new Map();
+  const token = `user-token-${++tokenSequence}`;
+  credentials.set(token, {
+    ...testScope('user-profile', 'user-task', 'user-run-1', ['read_marker']),
+    operationId: 'user',
+  });
+  let host;
+  host = createHost({
+    providers,
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: scope.registryDigest || host.catalog.digest } : null;
+    },
+  });
+  const authorization = `Bearer ${token}`;
+
+  const list = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'user-list-1', method: 'tools/list' },
+    authorization,
+    headers: {},
+  });
+  assert.equal(list.error, undefined);
+  assert.equal(list.result.tools.length, 1);
+  assert.equal(list.result.tools[0].name, 'read_marker');
+
+  const call = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'user-call-1', method: 'tools/call', params: { name: 'read_marker', arguments: { marker: 'user-marker-1' } } },
+    authorization,
+    headers: {},
+  });
+  assert.equal(call.error, undefined);
+  assert.deepEqual(JSON.parse(call.result.content[0].text), {
+    marker: 'user-marker-1',
+    profileId: 'user-profile',
+    taskId: 'user-task',
+  });
+});
+
+test('user scope denies tools/call when runId is missing', async () => {
+  const credentials = new Map();
+  const token = `user-token-no-run-${++tokenSequence}`;
+  const scopeWithNoRun = testScope('user-profile', 'user-task', 'run-a', ['read_marker']);
+  delete scopeWithNoRun.runId;
+  credentials.set(token, {
+    ...scopeWithNoRun,
+    operationId: 'user',
+  });
+  let host;
+  host = createHost({
+    providers,
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: scope.registryDigest || host.catalog.digest } : null;
+    },
+  });
+  const authorization = `Bearer ${token}`;
+
+  const call = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'user-call-no-run', method: 'tools/call', params: { name: 'read_marker', arguments: { marker: 'x' } } },
+    authorization,
+    headers: {},
+  });
+  assert.equal(call.error.code, -32001);
+});
+
+test('user scope denies unknown methods', async () => {
+  const credentials = new Map();
+  const token = `user-token-unknown-method-${++tokenSequence}`;
+  credentials.set(token, {
+    ...testScope('user-profile', 'user-task', 'user-run-1', ['read_marker']),
+    operationId: 'user',
+  });
+  let host;
+  host = createHost({
+    providers,
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: scope.registryDigest || host.catalog.digest } : null;
+    },
+  });
+  const authorization = `Bearer ${token}`;
+
+  const unknown = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'user-unknown', method: 'unknown/method' },
+    authorization,
+    headers: {},
+  });
+  assert.equal(unknown.error.code, -32601);
+  assert.match(unknown.error.message, /Method not found/);
+});
+
+test('user scope denies tools not in allowedTools', async () => {
+  const credentials = new Map();
+  const token = `user-token-deny-tool-${++tokenSequence}`;
+  credentials.set(token, {
+    ...testScope('user-profile', 'user-task', 'user-run-1', ['read_marker']),
+    operationId: 'user',
+  });
+  let host;
+  host = createHost({
+    providers,
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: scope.registryDigest || host.catalog.digest } : null;
+    },
+  });
+  const authorization = `Bearer ${token}`;
+
+  const call = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'user-call-deny', method: 'tools/call', params: { name: 'unknown_tool', arguments: {} } },
+    authorization,
+    headers: {},
+  });
+  assert.equal(call.result.isError, true);
+  assert.match(call.result.content[0].text, /Unknown tool/);
+});
+
+test('user scope with expired token is denied', async () => {
+  const credentials = new Map();
+  const token = `user-token-expired-${++tokenSequence}`;
+  credentials.set(token, {
+    ...testScope('user-profile', 'user-task', 'user-run-1', ['read_marker']),
+    operationId: 'user',
+    expiresAt: Date.now() - 1000,
+  });
+  let host;
+  host = createHost({
+    providers,
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: scope.registryDigest || host.catalog.digest } : null;
+    },
+  });
+  const authorization = `Bearer ${token}`;
+
+  const list = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'user-expired-list', method: 'tools/list' },
+    authorization,
+    headers: {},
+  });
+  assert.equal(list.error.code, -32001);
+});
+
+test('user scope with wrong audience is denied', async () => {
+  const credentials = new Map();
+  const token = `user-token-wrong-audience-${++tokenSequence}`;
+  credentials.set(token, {
+    ...testScope('user-profile', 'user-task', 'user-run-1', ['read_marker']),
+    operationId: 'user',
+    audience: 'wrong-audience',
+  });
+  let host;
+  host = createHost({
+    providers,
+    audience: testAudience,
+    authenticate: async ({ authorization }) => {
+      const scope = credentials.get(String(authorization || '').replace(/^Bearer /, ''));
+      return scope ? { ...scope, registryDigest: scope.registryDigest || host.catalog.digest } : null;
+    },
+  });
+  const authorization = `Bearer ${token}`;
+
+  const list = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'user-wrong-audience-list', method: 'tools/list' },
+    authorization,
+    headers: {},
+  });
+  assert.equal(list.error.code, -32001);
+});
+
+test('machine vectors still pass after user scope addition', async () => {
+  const { host, authorization } = setup();
+
+  const discovery = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'machine-discovery', method: 'tools/list' },
+    authorization,
+    headers: {},
+  });
+  assert.equal(discovery.error, undefined);
+  assert.equal(discovery.result.tools.length, 1);
+
+  const invocation = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'machine-invocation', method: 'tools/call', params: { name: 'read_marker', arguments: { marker: 'machine-marker' } } },
+    authorization,
+    headers: {},
+  });
+  assert.equal(invocation.error, undefined);
+  assert.deepEqual(JSON.parse(invocation.result.content[0].text), {
+    marker: 'machine-marker',
+    profileId: 'profile_a',
+    taskId: 'task-a',
+  });
+});
+
 test('Two sessions of one key run ID=1 concurrently and foreign cancel has no effect', async () => {
   let host;
   host = createHost({
