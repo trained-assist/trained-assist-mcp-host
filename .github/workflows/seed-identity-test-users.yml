@@ -41,7 +41,7 @@ jobs:
           DB_NAME: trained-assist-mcp-identity
         run: |
           db_id=$(npx --yes wrangler@4.146.0 d1 list --json --config wrangler.identity.jsonc 2>/dev/null \
-            | node -e "const s=require('fs').readFileSync(0,'utf8');try{const l=JSON.parse(s);const a=Array.isArray(l)?l:[l];const d=a.find(x=>x.database_name===process.env.DB_NAME);if(d)process.stdout.write(d.database_id)}catch{}")
+            | node -e "const s=require('fs').readFileSync(0,'utf8');try{const l=JSON.parse(s);const a=Array.isArray(l)?l:[l];const d=a.find(x=>x.name===process.env.DB_NAME);if(d)process.stdout.write(d.uuid)}catch{}")
           if [ -z "$db_id" ]; then
             echo "D1 database $DB_NAME not found; run the Deploy Identity Lane Worker workflow first" >&2
             exit 1
