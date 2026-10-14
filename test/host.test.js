@@ -461,7 +461,7 @@ test('user scope accepts tools/list and tools/call with valid runId', async () =
   });
 });
 
-test('user scope denies tools/call when runId is missing', async () => {
+test('user scope allows tools/call without a synthetic runId', async () => {
   const credentials = new Map();
   const token = `user-token-no-run-${++tokenSequence}`;
   const scopeWithNoRun = testScope('user-profile', 'user-task', 'run-a', ['read_marker']);
@@ -486,7 +486,12 @@ test('user scope denies tools/call when runId is missing', async () => {
     authorization,
     headers: {},
   });
-  assert.equal(call.error.code, -32001);
+  assert.equal(call.error, undefined);
+  assert.deepEqual(JSON.parse(call.result.content[0].text), {
+    marker: 'x',
+    profileId: 'user-profile',
+    taskId: 'user-task',
+  });
 });
 
 test('user scope denies unknown methods', async () => {

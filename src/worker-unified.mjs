@@ -14,7 +14,7 @@ async function resolveMode(request, env) {
   const match = /^Bearer ([^\s]+)$/.exec(String(request.headers.get('authorization') || ''));
   if (!match) return 'machine';
   if (typeof env.MCP_IDENTITY_DB !== 'object' || env.MCP_IDENTITY_DB === null) return 'machine';
-  const human = await verifyKey(env, match[1], { service: HUMAN_SERVICE });
+  const human = await verifyKey(env, match[1], { acceptedServices: [HUMAN_SERVICE, 'ladder'] });
   return human ? 'human' : 'machine';
 }
 

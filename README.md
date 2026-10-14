@@ -4,6 +4,8 @@ Standalone MCP host runtime for Trained Assist providers. It owns transport adap
 
 This repository has no runtime dependency on `trained-assist-agent`, its runner, Telegram, prompt assembly, Task Store, scheduler, or profile storage. It has no production provider configured. The test Worker entrypoint below is a separate hard-scoped read-only fixture for the first CP→Runner integration slice.
 
+The current personal-key connection plan and first-user setup are documented in [AUTH-ARCHITECTURE.md](AUTH-ARCHITECTURE.md) and [USER-AUTH-MVP.md](USER-AUTH-MVP.md). The user sandbox Worker is separate from the machine test Worker. The human gateway includes an optional Google Docs read-only provider; live OAuth requires deployment secrets and an exact registered callback URL.
+
 ## Runtime
 
 Node.js 22 or newer; no third-party runtime dependencies.

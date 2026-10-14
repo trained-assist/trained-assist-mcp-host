@@ -1,13 +1,14 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { createGoogleDocsProvider } = require('./google-docs');
 
 const HUMAN_SERVICE = 'mcp-host';
 const HUMAN_AUDIENCE = 'trained-assist:registry-mcp:test';
 
 function humanToolsForRole(role) {
-  const tools = ['identity.whoami'];
-  if (role === 'recruiter') tools.push('recruiter.fixture_read');
+  const tools = ['identity.whoami', 'google_docs.connect', 'google_docs.get_document'];
+  if (role === 'recruiter' || role === 'admin') tools.push('recruiter.fixture_read');
   return tools;
 }
 
@@ -23,10 +24,11 @@ function makeTrace(identity, toolName, nonce) {
   };
 }
 
-function createHumanProvider() {
+function createHumanProvider(env) {
+  const googleProvider = createGoogleDocsProvider(env);
   return {
     id: 'identity-human',
-    version: '1.0.0',
+    version: '1.1.0',
     tools: [
       {
         name: 'identity.whoami',
@@ -62,6 +64,7 @@ handler: async (args, context) => {
           };
         },
       },
+      ...googleProvider.tools,
     ],
   };
 }
@@ -69,11 +72,10 @@ handler: async (args, context) => {
 function humanScope(identity, catalogDigest) {
   const now = Date.now();
   return {
-    profileId: `mcp-human:${identity.role}`,
+    profileId: `user:${identity.userId}:default`,
     taskId: `user:${identity.userId}`,
     generation: 1,
     principalId: `user:${identity.userId}`,
-    runId: crypto.randomUUID(),
     bindingRef: `user:${identity.userId}`,
     policyVersion: 'mcp-human-policy-v1',
     registryDigest: catalogDigest,
@@ -86,7 +88,7 @@ function humanScope(identity, catalogDigest) {
     },
     allowedTools: humanToolsForRole(identity.role),
     audience: HUMAN_AUDIENCE,
-    operationId: 'human-invocation',
+    operationId: 'user',
     expiresAt: now + 15 * 60 * 1000,
   };
 }

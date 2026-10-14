@@ -1,0 +1,49 @@
+name: Deploy user MCP gateway sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate the Worker bundle without deploying
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-user-gateway-sandbox
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: sandbox
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      DATABASE_NAME: trained-assist-llm-ladder-trace
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve shared Ladder identity database
+        id: d1
+        run: |
+          database_id=$(npx --yes wrangler@4.146.0 d1 list --json --config wrangler.user.jsonc 2>/dev/null \
+            | node -e "const s=require('fs').readFileSync(0,'utf8');try{const l=JSON.parse(s);const a=Array.isArray(l)?l:[l];const d=a.find(x=>x.file_name===process.env.DATABASE_NAME||x.name===process.env.DATABASE_NAME);process.stdout.write(d?d.uuid||d.database_id:'')}catch{}")
+          test -n "$database_id"
+          echo "database_id=$database_id" >> "$GITHUB_OUTPUT"
+      - name: Bind the existing identity database
+        env:
+          DATABASE_ID: ${{ steps.d1.outputs.database_id }}
+        run: |
+          node -e "const fs=require('fs');const p='wrangler.user.jsonc';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.d1_databases[0].database_id=process.env.DATABASE_ID;fs.writeFileSync(p,JSON.stringify(c,null,2))"
+      - name: Dry run
+        if: ${{ inputs.dry_run }}
+        run: npx --yes wrangler@4.146.0 deploy --dry-run --config wrangler.user.jsonc
+      - name: Deploy sandbox Worker
+        if: ${{ inputs.dry_run == false }}
+        run: npx --yes wrangler@4.146.0 deploy --config wrangler.user.jsonc

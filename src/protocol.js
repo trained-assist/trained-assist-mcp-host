@@ -25,8 +25,8 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
     if (operationId === 'discovery') {
       if (method !== 'tools/list' || scope.runId !== undefined) return null;
     } else if (operationId === 'user') {
-      if (method !== 'tools/list' && method !== 'tools/call') return null;
-      if (typeof scope.runId !== 'string' || !scope.runId) return null;
+      if (method !== 'tools/list' && method !== 'tools/call' && method !== 'notifications/cancelled') return null;
+      if (scope.runId !== undefined && (typeof scope.runId !== 'string' || !scope.runId)) return null;
     } else {
       if (typeof scope.runId !== 'string' || !scope.runId) return null;
     }

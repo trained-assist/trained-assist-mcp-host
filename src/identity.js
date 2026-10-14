@@ -12,6 +12,7 @@ async function hashKey(key) {
 
 async function verifyKey(env, providedKey, options = {}) {
   const service = options.service || DEFAULT_SERVICE;
+  const acceptedServices = options.acceptedServices || [service];
   const now = options.now || Date.now();
   if (!env.MCP_IDENTITY_DB || typeof providedKey !== 'string' || !providedKey) return null;
   const keyHash = await hashKey(providedKey);
@@ -23,7 +24,7 @@ async function verifyKey(env, providedKey, options = {}) {
      WHERE k.key_hash = ? AND k.revoked_at IS NULL`
   ).bind(keyHash).first();
   if (!row || row.user_status !== 'active' || row.key_status !== 'active') return null;
-  if (row.user_service !== service) return null;
+  if (!acceptedServices.includes(row.user_service)) return null;
   if (row.expires_at !== null && row.expires_at !== undefined && row.expires_at <= now) return null;
   env.MCP_IDENTITY_DB.prepare(
     `UPDATE identity_api_keys SET last_used_at = ? WHERE key_hash = ?`

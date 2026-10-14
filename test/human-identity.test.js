@@ -23,7 +23,7 @@ async function setup() {
     authenticate: async ({ authorization }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
       if (!match) return null;
-      const human = await identity.verifyKey(env, match[1], { service: HUMAN_SERVICE });
+      const human = await identity.verifyKey(env, match[1], { acceptedServices: [HUMAN_SERVICE, 'ladder'] });
       return human ? humanScope(human, host.catalog.digest) : null;
     },
   });
@@ -62,7 +62,7 @@ test('recruiter key sees whoami and recruiter.fixture_read', async () => {
   await seedUser(env, { userId: 'user-rec', email: 'rec@example.com', role: 'recruiter' });
   const { key } = await identity.issueApiKey(env, { userId: 'user-rec', label: 'rec-key' });
   const response = await listTools(host, `Bearer ${key}`);
-  assert.deepEqual(toolNames(response).sort(), ['identity.whoami', 'recruiter.fixture_read']);
+  assert.deepEqual(toolNames(response).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
 });
 
 test('non-recruiter key sees whoami only and not the recruiter tool', async () => {
@@ -70,7 +70,7 @@ test('non-recruiter key sees whoami only and not the recruiter tool', async () =
   await seedUser(env, { userId: 'user-sales', email: 'sales@example.com', role: 'sales' });
   const { key } = await identity.issueApiKey(env, { userId: 'user-sales', label: 'sales-key' });
   const response = await listTools(host, `Bearer ${key}`);
-  assert.deepEqual(toolNames(response), ['identity.whoami']);
+  assert.deepEqual(toolNames(response).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami']);
 });
 
 test('whoami returns caller identity and trusted trace without secrets', async () => {
@@ -138,12 +138,12 @@ test('disabled user is denied on the next request', async () => {
   assert.equal((await listTools(host, `Bearer ${key}`)).error.code, -32001);
 });
 
-test('wrong-service key is denied on the MCP gateway', async () => {
+test('Ladder personal key is accepted on the MCP gateway', async () => {
   const { host, env } = await setup();
   await seedUser(env, { userId: 'user-ladder', email: 'ladder@example.com', role: 'recruiter', service: 'ladder' });
-  const { key } = await identity.issueApiKey(env, { userId: 'user-ladder', label: 'ladder-key' });
+  const { key } = await identity.issueApiKey(env, { userId: 'user-ladder', label: 'ladder-key', service: 'ladder' });
   const response = await listTools(host, `Bearer ${key}`);
-  assert.equal(response.error.code, -32001);
+  assert.deepEqual(toolNames(response).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
 });
 
 test('expired key is denied', async () => {
@@ -155,9 +155,9 @@ test('expired key is denied', async () => {
 });
 
 test('role policy keeps recruiter tool out of non-recruiter catalog', () => {
-  assert.deepEqual(humanToolsForRole('recruiter').sort(), ['identity.whoami', 'recruiter.fixture_read']);
-  assert.deepEqual(humanToolsForRole('user'), ['identity.whoami']);
-  assert.deepEqual(humanToolsForRole('admin'), ['identity.whoami']);
+  assert.deepEqual(humanToolsForRole('recruiter').sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
+  assert.deepEqual(humanToolsForRole('user').sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami']);
+  assert.deepEqual(humanToolsForRole('admin').sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
 });
 
 test('human worker fetch path serves tools/list and tools/call over HTTP', async () => {
@@ -178,7 +178,7 @@ test('human worker fetch path serves tools/list and tools/call over HTTP', async
   );
   const listedBody = await listed.json();
   assert.equal(listed.status, 200);
-  assert.deepEqual(listedBody.result.tools.map((t) => t.name).sort(), ['identity.whoami', 'recruiter.fixture_read']);
+  assert.deepEqual(listedBody.result.tools.map((t) => t.name).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
 
   const called = await humanWorker.fetch(
     new Request('https://human.example/mcp', {
