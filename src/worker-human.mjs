@@ -1,10 +1,12 @@
 import hostModule from './index.js';
 import identityModule from './identity.js';
 import humanModule from './human.js';
+import googleDocsModule from './google-docs.js';
 
 const { createHost } = hostModule;
 const { initTables, createUser, issueApiKey, revokeApiKey, verifyKey, setUserStatus } = identityModule;
 const { createHumanProvider, humanScope, HUMAN_SERVICE, HUMAN_AUDIENCE } = humanModule;
+const { finishGoogleAuthorization } = googleDocsModule;
 
 const audience = HUMAN_AUDIENCE;
 
@@ -13,12 +15,12 @@ let cachedHumanHost = null;
 function humanHostFor(env) {
   if (cachedHumanHost && cachedHumanHost.env === env) return cachedHumanHost.host;
   const host = createHost({
-    providers: [createHumanProvider()],
+    providers: [createHumanProvider(env)],
     audience,
     authenticate: async ({ authorization }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
       if (!match) return null;
-      const human = await verifyKey(env, match[1], { service: HUMAN_SERVICE });
+      const human = await verifyKey(env, match[1], { acceptedServices: [HUMAN_SERVICE, 'ladder'] });
       return human ? humanScope(human, host.catalog.digest) : null;
     },
   });
@@ -32,6 +34,10 @@ export { initTables, createUser, issueApiKey, revokeApiKey, verifyKey, setUserSt
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/oauth/google/callback' && request.method === 'GET') {
+      if (!configured(env)) return new Response('human MCP binding is not configured', { status: 503 });
+      return finishGoogleAuthorization(env, url);
+    }
     if (url.pathname === '/mcp') {
       if (!configured(env)) return new Response('human MCP binding is not configured', { status: 503 });
       return humanHostFor(env).fetchHandler(request);
