@@ -2,9 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { createHost } = require('../src');
 const identity = require('../src/identity');
 const { createHumanProvider, humanScope, humanToolsForRole, HUMAN_SERVICE } = require('../src/human');
+const { AGENT_BINDING, AGENT_ISSUER, AGENT_POLICY, AGENT_SCOPE, AGENT_SERVER, DEFAULT_USER_CATALOGUE, HUMAN_AUDIENCE } = require('../src/human');
 const { createFakeD1, applyMigrations } = require('../test/helpers/fake-d1');
 
 const migrationFiles = [
@@ -19,7 +21,7 @@ async function setup() {
   let host;
   host = createHost({
     providers: [createHumanProvider()],
-    audience: 'trained-assist:registry-mcp:test',
+    audience: HUMAN_AUDIENCE,
     authenticate: async ({ authorization }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
       if (!match) return null;
@@ -182,6 +184,59 @@ test('human worker fetch path serves tools/list and tools/call over HTTP', async
   assert.equal(calledBody.result.isError, true);
   assert.match(calledBody.result.content[0].text, /Unknown tool/);
   assert.equal(JSON.stringify(calledBody).includes('fixture-marker'), false);
+});
+
+test('runner-signed run grant exposes only its scoped user tools without a personal key', async () => {
+  const { default: humanWorker } = await import('../src/worker-human.mjs');
+  const db = createFakeD1();
+  await applyMigrations(db, migrationFiles);
+  const env = { MCP_IDENTITY_DB: db, MCP_RUNNER_AUTH_TOKEN: 'runner-transport-token-1234567890', MCP_USER_CATALOGUE_VERSION: DEFAULT_USER_CATALOGUE };
+  await identity.createUser(env, { userId: 'user-agent', email: 'agent@example.com', role: 'user' });
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  env.MCP_RUNNER_PUBLIC_JWK = JSON.stringify(publicKey.export({ format: 'jwk' }));
+  const host = createHost({ providers: [createHumanProvider(env)], audience: HUMAN_AUDIENCE });
+  const now = Math.floor(Date.now() / 1000);
+  const claims = {
+    iss: AGENT_ISSUER, aud: HUMAN_AUDIENCE, sub: 'run_12345678-1234-1234-1234-123456789abc',
+    userId: 'user-agent', profileId: 'telegram-test-profile', userTaskId: 'task-test-1',
+    runId: 'run_12345678-1234-1234-1234-123456789abc', ownerGeneration: 2,
+    serverId: AGENT_SERVER, bindingRef: AGENT_BINDING, scope: AGENT_SCOPE, policyVersion: AGENT_POLICY,
+    catalogueVersion: DEFAULT_USER_CATALOGUE, catalogueDigest: host.catalog.digest,
+    allowedTools: ['identity.whoami', 'google_docs.get_document'], iat: now, exp: now + 300,
+  };
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const unsigned = `${encode({ alg: 'EdDSA', typ: 'JWT' })}.${encode(claims)}`;
+  const proof = `${unsigned}.${crypto.sign(null, Buffer.from(unsigned), privateKey).toString('base64url')}`;
+  const headers = {
+    authorization: `Bearer ${env.MCP_RUNNER_AUTH_TOKEN}`,
+    'x-mcp-run-binding': proof,
+    'x-mcp-operation': 'invocation',
+    'x-mcp-scope': AGENT_SCOPE,
+    'x-mcp-user-task-id': claims.userTaskId,
+    'x-mcp-profile': claims.profileId,
+    'x-mcp-run-id': claims.runId,
+  };
+  const listed = await humanWorker.fetch(new Request('https://human.example/mcp', {
+    method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  }), env);
+  const listedBody = await listed.json();
+  assert.deepEqual(listedBody.result.tools.map(tool => tool.name).sort(), claims.allowedTools.sort());
+
+  const called = await humanWorker.fetch(new Request('https://human.example/mcp', {
+    method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'identity.whoami', arguments: {} } }),
+  }), env);
+  const result = await called.json();
+  const identityResult = JSON.parse(result.result.content[0].text);
+  assert.equal(identityResult.userId, 'user-agent');
+  assert.equal(identityResult.trace.keyHash, null);
+
+  const mismatched = await humanWorker.fetch(new Request('https://human.example/mcp', {
+    method: 'POST', headers: { ...headers, 'x-mcp-run-id': 'run_other', 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' }),
+  }), env);
+  assert.equal((await mismatched.json()).error.code, -32001);
 });
 
 test('machine fixture worker catalog digest is unchanged by the human worker', async () => {

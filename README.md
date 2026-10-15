@@ -72,3 +72,9 @@ npm run check
 ```
 
 Offline tests use only in-memory providers and local HTTP fixtures. They do not prove live credentials, remote provider availability, deployment, or consumer cutover.
+
+## Runner delegated access to the user catalog
+
+The user Worker can accept an optional Runner invocation in addition to personal API keys. This path is intended for an explicitly configured sandbox run and does not expose a user's long-lived personal key to Runner or OpenCode. Runner authenticates with the secret `MCP_RUNNER_AUTH_TOKEN` and presents an Ed25519 JWS in `X-MCP-Run-Binding`; the Worker verifies it against the public-only `MCP_RUNNER_PUBLIC_JWK`. The proof is bound to one run, task, profile, active user, exact server/binding/scope/policy, catalogue digest/version, tool allowlist, owner generation, and a maximum two-hour lifetime. The host re-checks that the mapped user remains active on each MCP request. Missing or mismatched claims fail closed.
+
+Sandbox configuration names are `MCP_RUNNER_AUTH_TOKEN` (Worker secret), `MCP_RUNNER_PUBLIC_JWK` (Worker variable), and optional `MCP_USER_CATALOGUE_VERSION` (Worker variable, default `mem-gpt-user-catalogue-v1`). Runner must keep the matching signing private key and transport token in its own sandbox secret store and may issue proofs only for an explicit trusted profile-to-user mapping. Never pass the personal user API key to Runner, OpenCode, or RunSpec. Do not enable this path in production until the profile mapping, key provisioning, connected provider authorization, and full CP→Runner→OpenCode tool-call path have been reviewed and tested there separately.
