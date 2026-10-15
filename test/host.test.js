@@ -7,6 +7,21 @@ const { once } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { webcrypto } = require('node:crypto');
 const { createHost } = require('../src');
+const proofContract = require('../contracts/runner-mcp-proof/v1/contract.json');
+
+test('versioned Runner MCP proof fixture is internally consistent', () => {
+  const patterns = proofContract.runId.patterns.map((pattern) => new RegExp(pattern));
+  const accepted = (runId) => runId.length >= proofContract.runId.minLength
+    && runId.length <= proofContract.runId.maxLength && patterns.some((pattern) => pattern.exec(runId)?.[0] === runId);
+  assert.equal(proofContract.schemaVersion, 1);
+  assert.equal(new Set(proofContract.proof.requiredClaims).size, proofContract.proof.requiredClaims.length);
+  assert.deepEqual(Object.keys(proofContract.proof.header).sort(), ['alg', 'typ']);
+  assert.equal(proofContract.proof.bindings.runIdClaim, 'runId');
+  assert.equal(proofContract.proof.bindings.subjectClaim, 'sub');
+  assert.equal(proofContract.proof.bindings.taskIdClaim, 'userTaskId');
+  for (const runId of proofContract.runId.acceptedExamples) assert.equal(accepted(runId), true);
+  for (const runId of proofContract.runId.rejectedExamples) assert.equal(accepted(runId), false);
+});
 
 let tokenSequence = 0;
 const testAudience = 'trained-assist-mcp-host:test';
@@ -261,36 +276,38 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
   const publicJwk = await webcrypto.subtle.exportKey('jwk', keyPair.publicKey);
   const e2ePublicJwk = await webcrypto.subtle.exportKey('jwk', e2eKeyPair.publicKey);
   const b64 = (value) => Buffer.from(value).toString('base64url');
+  const fixtureRunId = proofContract.runId.acceptedExamples[0];
   const signProof = async (overrides = {}, signer = keyPair.privateKey) => {
     const now = Math.floor(Date.now() / 1000);
     const claims = {
-      iss: 'trained-assist-agent-runner', aud: 'trained-assist:registry-mcp:test',
-      sub: 'run_01234567-89ab-cdef-0123-456789abcdef', runId: 'run_01234567-89ab-cdef-0123-456789abcdef',
-      userTaskId: 'task-160', profileId: 'integration-telegram-ux-v1', principalId: 'integration-telegram-ux-v1',
-      serverId: 'trained-assist-registry-test', bindingRef: 'registry-mcp-test-160-read',
-      allowedTools: ['registry.fixture_read'], policyVersion: 'registry-fixture-policy-v1',
-      catalogueVersion: 'registry-fixture-catalogue-v1', registryDigest: workerDigest, scope: 'registry:fixture-read',
+      iss: proofContract.proof.issuer, aud: proofContract.proof.audience,
+      sub: fixtureRunId, runId: fixtureRunId,
+      userTaskId: proofContract.testTool.taskId, profileId: proofContract.testTool.profileId,
+      principalId: proofContract.testTool.principalId, serverId: proofContract.testTool.serverId,
+      bindingRef: proofContract.testTool.bindingRef, allowedTools: [proofContract.testTool.tool],
+      policyVersion: proofContract.testTool.policyVersion, catalogueVersion: proofContract.testTool.catalogueVersion,
+      registryDigest: workerDigest, scope: proofContract.testTool.scope,
       iat: now - 1, exp: now + 30, ...overrides,
     };
-    const input = `${b64(JSON.stringify({ alg: 'EdDSA', typ: 'JWT' }))}.${b64(JSON.stringify(claims))}`;
+    const input = `${b64(JSON.stringify(proofContract.proof.header))}.${b64(JSON.stringify(claims))}`;
     return `${input}.${b64(await webcrypto.subtle.sign({ name: 'Ed25519' }, signer, Buffer.from(input)))}`;
   };
   const env = {
     MCP_TEST_AUTH_TOKEN: 'test-only-secret',
-    MCP_TEST_PRINCIPAL_ID: 'integration-telegram-ux-v1',
+    MCP_TEST_PRINCIPAL_ID: proofContract.testTool.principalId,
     MCP_TEST_EXPIRES_AT: new Date(Date.now() + 60_000).toISOString(),
     MCP_TEST_GENERATION: '1',
     MCP_TEST_RUNNER_PUBLIC_JWK: JSON.stringify(publicJwk),
     MCP_TEST_E2E_ENABLED: 'true',
     MCP_TEST_E2E_PUBLIC_JWK: JSON.stringify(e2ePublicJwk),
-    MCP_TEST_CATALOGUE_VERSION: 'registry-fixture-catalogue-v1',
+    MCP_TEST_CATALOGUE_VERSION: proofContract.testTool.catalogueVersion,
   };
   const request = (headers, message, requestEnv = env) => worker.fetch(new Request('https://mcp.test/mcp', {
     method: 'POST',
     headers: { authorization: 'Bearer test-only-secret', 'content-type': 'application/json', ...headers },
     body: JSON.stringify(message),
   }), requestEnv);
-  const baseScope = { 'x-mcp-user-task-id': 'task-160', 'x-mcp-profile': 'integration-telegram-ux-v1' };
+  const baseScope = { 'x-mcp-user-task-id': proofContract.testTool.taskId, 'x-mcp-profile': proofContract.testTool.profileId };
   let workerDigest;
 
   const invalidKeyEnv = { ...env, MCP_TEST_RUNNER_PUBLIC_JWK: JSON.stringify({ ...publicJwk, d: 'private-material' }) };
@@ -304,12 +321,12 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     ...baseScope,
     'x-mcp-operation': 'discovery',
     'x-mcp-generation': '1',
-    'x-mcp-principal-id': 'integration-telegram-ux-v1',
+    'x-mcp-principal-id': proofContract.testTool.principalId,
   }, { jsonrpc: '2.0', id: 'catalogue-1', method: 'tools/list' });
   assert.equal(discovery.status, 200);
   assert.deepEqual((await discovery.json()).result.tools.map((tool) => tool.name), ['registry.fixture_read']);
 
-  const discoveryNoRunId = await request({ ...baseScope, 'x-mcp-operation': 'discovery', 'x-mcp-generation': '1', 'x-mcp-principal-id': 'integration-telegram-ux-v1' },
+  const discoveryNoRunId = await request({ ...baseScope, 'x-mcp-operation': 'discovery', 'x-mcp-generation': '1', 'x-mcp-principal-id': proofContract.testTool.principalId },
     { jsonrpc: '2.0', id: 'catalogue-no-run', method: 'tools/list' });
   assert.equal((await discoveryNoRunId.json()).error, undefined);
 
@@ -317,15 +334,15 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     ...baseScope,
     'x-mcp-operation': 'discovery',
     'x-mcp-generation': '1',
-    'x-mcp-principal-id': 'integration-telegram-ux-v1',
+    'x-mcp-principal-id': proofContract.testTool.principalId,
   }, { jsonrpc: '2.0', id: 'bad-discovery-call', method: 'tools/call', params: { name: 'registry.fixture_read' } });
   assert.equal((await discoveryCall.json()).error.code, -32001);
 
-  const discoveryWithRunId = await request({ ...baseScope, 'x-mcp-operation': 'discovery', 'x-mcp-generation': '1', 'x-mcp-principal-id': 'integration-telegram-ux-v1', 'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef' },
+  const discoveryWithRunId = await request({ ...baseScope, 'x-mcp-operation': 'discovery', 'x-mcp-generation': '1', 'x-mcp-principal-id': proofContract.testTool.principalId, 'x-mcp-run-id': fixtureRunId },
     { jsonrpc: '2.0', id: 'catalogue-run-denied', method: 'tools/list' });
   assert.equal((await discoveryWithRunId.json()).error.code, -32001);
 
-  const catalogResponse = await request({ ...baseScope, 'x-mcp-operation': 'discovery', 'x-mcp-generation': '1', 'x-mcp-principal-id': 'integration-telegram-ux-v1' },
+  const catalogResponse = await request({ ...baseScope, 'x-mcp-operation': 'discovery', 'x-mcp-generation': '1', 'x-mcp-principal-id': proofContract.testTool.principalId },
     { jsonrpc: '2.0', id: 'digest', method: 'tools/list' });
   // The pinned test catalog digest is returned by the host instance used for this Worker request.
   workerDigest = (await catalogResponse.json()).result.tools.length ? (await import('../src/index.js')).createHost({ providers: [{ id: 'registry-fixture', version: '1.0.0-test', tools: [{ name: 'registry.fixture_read', description: 'Read the pinned marker from the Registry MCP test fixture.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, requiredBindings: ['registry-mcp-test-160-read'], handler: async () => null }] }] }).catalog.digest : '';
@@ -334,15 +351,38 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     ...baseScope,
     'x-mcp-operation': 'invocation',
     'x-mcp-scope': 'registry:fixture-read',
-    'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef',
+    'x-mcp-run-id': fixtureRunId,
     'x-mcp-run-binding': await signProof(),
   }, { jsonrpc: '2.0', id: 'run-call', method: 'tools/call', params: { name: 'registry.fixture_read' } });
   assert.equal(invocation.status, 200);
   assert.deepEqual(JSON.parse((await invocation.json()).result.content[0].text), {
     marker: 'registry-fixture-marker-160-v1',
-    profileId: 'integration-telegram-ux-v1',
-    taskId: 'task-160',
-    runId: 'run_01234567-89ab-cdef-0123-456789abcdef',
+    profileId: proofContract.testTool.profileId,
+    taskId: proofContract.testTool.taskId,
+    runId: fixtureRunId,
+  });
+
+  const apiRunId = proofContract.runId.acceptedExamples[1];
+  const apiProof = await signProof({ runId: apiRunId, sub: apiRunId });
+  const apiInvocationList = await request({
+    ...baseScope,
+    'x-mcp-operation': proofContract.transport.operationValue,
+    'x-mcp-scope': proofContract.testTool.scope,
+    'x-mcp-run-id': apiRunId,
+    'x-mcp-run-binding': apiProof,
+  }, { jsonrpc: '2.0', id: 'api-run-list', method: 'tools/list' });
+  assert.equal(apiInvocationList.status, 200);
+  assert.deepEqual((await apiInvocationList.json()).result.tools.map((tool) => tool.name), [proofContract.testTool.tool]);
+  const runHashAttemptInvocation = await request({
+    ...baseScope,
+    'x-mcp-operation': proofContract.transport.operationValue,
+    'x-mcp-scope': proofContract.testTool.scope,
+    'x-mcp-run-id': apiRunId,
+    'x-mcp-run-binding': apiProof,
+  }, { jsonrpc: '2.0', id: 'api-run-call', method: 'tools/call', params: { name: proofContract.testTool.tool, arguments: {} } });
+  assert.equal(runHashAttemptInvocation.status, 200);
+  assert.deepEqual(JSON.parse((await runHashAttemptInvocation.json()).result.content[0].text), {
+    marker: proofContract.testTool.marker, profileId: proofContract.testTool.profileId, taskId: proofContract.testTool.taskId, runId: apiRunId,
   });
 
   const e2eInvocation = await request({
@@ -378,26 +418,15 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
   assert.equal(invocationList.status, 200);
   assert.deepEqual((await invocationList.json()).result.tools.map((tool) => tool.name), ['registry.fixture_read']);
 
-  const apiRunId = `run_${'a'.repeat(64)}_${'b'.repeat(24)}`;
-  const apiProof = await signProof({ runId: apiRunId, sub: apiRunId });
-  const apiInvocation = await request({
-    ...baseScope,
-    'x-mcp-operation': 'invocation',
-    'x-mcp-scope': 'registry:fixture-read',
-    'x-mcp-run-id': apiRunId,
-    'x-mcp-run-binding': apiProof,
-  }, { jsonrpc: '2.0', id: 'api-run-call', method: 'tools/call', params: { name: 'registry.fixture_read', arguments: {} } });
-  assert.equal(apiInvocation.status, 200);
-  assert.deepEqual(JSON.parse((await apiInvocation.json()).result.content[0].text), {
-    marker: 'registry-fixture-marker-160-v1', profileId: 'integration-telegram-ux-v1', taskId: 'task-160', runId: apiRunId,
-  });
-
   const denyInvocation = async (headers, proof) => {
-    const response = await request({ ...baseScope, 'x-mcp-operation': 'invocation', 'x-mcp-scope': 'registry:fixture-read', 'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef', ...headers, ...(proof ? { 'x-mcp-run-binding': proof } : {}) },
-      { jsonrpc: '2.0', id: 'denied-proof', method: 'tools/call', params: { name: 'registry.fixture_read' } });
+    const response = await request({ ...baseScope, 'x-mcp-operation': 'invocation', 'x-mcp-scope': proofContract.testTool.scope, 'x-mcp-run-id': fixtureRunId, ...headers, ...(proof ? { 'x-mcp-run-binding': proof } : {}) },
+      { jsonrpc: '2.0', id: 'denied-proof', method: 'tools/call', params: { name: proofContract.testTool.tool } });
     assert.equal((await response.json()).error.code, -32001);
   };
   await denyInvocation({}, null);
+  for (const invalidRunId of proofContract.runId.rejectedExamples) {
+    await denyInvocation({ 'x-mcp-run-id': invalidRunId }, await signProof({ runId: invalidRunId, sub: invalidRunId }));
+  }
   await denyInvocation({}, await signProof({ runId: 'run_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', sub: 'run_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }));
   await denyInvocation({}, await signProof({ bindingRef: 'another-binding' }));
   await denyInvocation({ 'x-mcp-scope': 'registry:write' }, await signProof());

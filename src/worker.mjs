@@ -1,17 +1,19 @@
 import hostModule from './index.js';
 import identityModule from './identity.js';
+import proofContract from '../contracts/runner-mcp-proof/v1/contract.cjs';
 
 const { createHost } = hostModule;
 const { initTables, createUser, issueApiKey, revokeApiKey, verifyKey } = identityModule;
-const serverId = 'trained-assist-registry-test';
-const toolName = 'registry.fixture_read';
-const audience = 'trained-assist:registry-mcp:test';
-const profileId = 'integration-telegram-ux-v1';
-const bindingRef = 'registry-mcp-test-160-read';
-const policyVersion = 'registry-fixture-policy-v1';
-const catalogueVersion = 'registry-fixture-catalogue-v1';
-const executionScope = 'registry:fixture-read';
-const fixtureMarker = 'registry-fixture-marker-160-v1';
+const serverId = proofContract.testTool.serverId;
+const toolName = proofContract.testTool.tool;
+const audience = proofContract.proof.audience;
+const profileId = proofContract.testTool.profileId;
+const bindingRef = proofContract.testTool.bindingRef;
+const policyVersion = proofContract.testTool.policyVersion;
+const catalogueVersion = proofContract.testTool.catalogueVersion;
+const executionScope = proofContract.testTool.scope;
+const fixtureMarker = proofContract.testTool.marker;
+const runIdPatterns = proofContract.runId.patterns.map((pattern) => new RegExp(pattern));
 const required = [
   'MCP_TEST_AUTH_TOKEN',
   'MCP_TEST_PRINCIPAL_ID',
@@ -70,10 +72,12 @@ async function verifyRunBinding(token, env, expected) {
   try {
     const header = JSON.parse(new TextDecoder().decode(decodePart(parts[0])));
     const claims = JSON.parse(new TextDecoder().decode(decodePart(parts[1])));
-    if (!header || Object.keys(header).sort().join(',') !== 'alg,typ' || header.alg !== 'EdDSA' || header.typ !== 'JWT') return null;
-    const expectedClaims = ['allowedTools', 'aud', 'bindingRef', 'catalogueVersion', 'exp', 'iat', 'iss', 'policyVersion', 'principalId', 'profileId', 'registryDigest', 'runId', 'scope', 'serverId', 'sub', 'userTaskId'];
+    const expectedHeaderKeys = Object.keys(proofContract.proof.header).sort();
+    if (!header || Object.keys(header).sort().join(',') !== expectedHeaderKeys.join(',')
+        || Object.entries(proofContract.proof.header).some(([key, value]) => header[key] !== value)) return null;
+    const expectedClaims = [...proofContract.proof.requiredClaims].sort();
     if (!claims || typeof claims !== 'object' || Array.isArray(claims)
-        || Object.keys(claims).sort().join(',') !== expectedClaims.sort().join(',')) return null;
+        || Object.keys(claims).sort().join(',') !== expectedClaims.join(',')) return null;
     const signingInput = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
     const signature = decodePart(parts[2]);
     const verificationKeys = [env.MCP_TEST_RUNNER_PUBLIC_JWK];
@@ -88,9 +92,11 @@ async function verifyRunBinding(token, env, expected) {
     }
     if (!valid) return null;
     const now = Math.floor(Date.now() / 1000);
-    if (claims.iss !== 'trained-assist-agent-runner' || claims.aud !== audience
-        || claims.sub !== expected.runId || claims.runId !== expected.runId
-        || claims.userTaskId !== expected.taskId || claims.profileId !== profileId
+    const identityBindings = proofContract.proof.bindings;
+    if (claims.iss !== proofContract.proof.issuer || claims.aud !== audience
+        || claims[identityBindings.runIdClaim] !== expected.runId
+        || claims[identityBindings.subjectClaim] !== expected.runId
+        || claims[identityBindings.taskIdClaim] !== expected.taskId || claims.profileId !== profileId
         || claims.principalId !== env.MCP_TEST_PRINCIPAL_ID || claims.serverId !== serverId
         || claims.bindingRef !== bindingRef || !Array.isArray(claims.allowedTools)
         || claims.allowedTools.length !== 1 || claims.allowedTools[0] !== toolName
@@ -99,7 +105,7 @@ async function verifyRunBinding(token, env, expected) {
         || claims.registryDigest !== expected.registryDigest
         || !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp)
         || claims.iat > now + 30 || claims.exp <= now || claims.exp <= claims.iat
-        || claims.exp - claims.iat > 86_400
+        || claims.exp - claims.iat > proofContract.proof.maxLifetimeSeconds
         || claims.exp > Math.floor(Date.parse(env.MCP_TEST_EXPIRES_AT) / 1000)) return null;
     return claims;
   } catch { return null; }
@@ -130,29 +136,32 @@ function hostFor(env) {
     authenticate: async ({ authorization, headers, method }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
       if (!match || !await sameSecret(match[1], env.MCP_TEST_AUTH_TOKEN)) return null;
-      const taskId = headers?.get?.('x-mcp-user-task-id') || '';
+      const taskId = headers?.get?.(proofContract.transport.taskIdHeader) || '';
       const requestProfileId = headers?.get?.('x-mcp-profile') || '';
-      const requestedOperation = headers?.get?.('x-mcp-operation') || '';
+      const requestedOperation = headers?.get?.(proofContract.transport.operationHeader) || '';
       const generation = Number(env.MCP_TEST_GENERATION || 1);
       if (!taskId || taskId.length > 200 || requestProfileId !== profileId) return null;
       let runId;
       let proofExpiry;
       if (requestedOperation === 'discovery') {
-        if (headers?.get?.('x-mcp-run-id') || headers?.get?.('x-mcp-run-binding') || headers?.get?.('x-mcp-scope')) return null;
+        if (headers?.get?.(proofContract.transport.runIdHeader) || headers?.get?.(proofContract.transport.proofHeader)
+            || headers?.get?.(proofContract.transport.scopeHeader)) return null;
         const requestGeneration = Number(headers?.get?.('x-mcp-generation'));
         const requestPrincipalId = headers?.get?.('x-mcp-principal-id') || '';
         if (method !== 'tools/list' || requestGeneration !== generation || requestPrincipalId !== env.MCP_TEST_PRINCIPAL_ID) return null;
         runId = undefined;
       } else {
-        if (requestedOperation !== 'invocation' || headers?.get?.('x-mcp-scope') !== executionScope) return null;
-        runId = headers?.get?.('x-mcp-run-id') || '';
+        if (requestedOperation !== proofContract.transport.operationValue
+            || headers?.get?.(proofContract.transport.scopeHeader) !== executionScope) return null;
+        runId = headers?.get?.(proofContract.transport.runIdHeader) || '';
         // VM runs use UUIDs; the sandbox Runner API uses a task hash and
         // attempt ID. Both remain bound to the signed proof below.
-        if (!/^run_(?:[a-f0-9-]{36}|[a-f0-9]{64}_[a-f0-9]{24})$/.test(runId)) return null;
+        if (runId.length < proofContract.runId.minLength || runId.length > proofContract.runId.maxLength
+            || !runIdPatterns.some((pattern) => pattern.exec(runId)?.[0] === runId)) return null;
         if (method !== 'tools/call' && method !== 'tools/list') return null;
         const catalogue = cachedHost?.catalog.digest;
         if (!catalogue) return null;
-        const proof = await verifyRunBinding(headers?.get?.('x-mcp-run-binding'), env, { runId, taskId, scope: executionScope, registryDigest: catalogue });
+        const proof = await verifyRunBinding(headers?.get?.(proofContract.transport.proofHeader), env, { runId, taskId, scope: executionScope, registryDigest: catalogue });
         if (!proof) return null;
         proofExpiry = proof.exp * 1000;
       }
