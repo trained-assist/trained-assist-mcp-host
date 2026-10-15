@@ -237,6 +237,13 @@ test('runner-signed run grant exposes only its scoped user tools without a perso
     body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' }),
   }), env);
   assert.equal((await mismatched.json()).error.code, -32001);
+
+  await identity.setUserStatus(env, 'user-agent', 'disabled');
+  const disabled = await humanWorker.fetch(new Request('https://human.example/mcp', {
+    method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/list' }),
+  }), env);
+  assert.equal((await disabled.json()).error.code, -32001);
 });
 
 test('machine fixture worker catalog digest is unchanged by the human worker', async () => {

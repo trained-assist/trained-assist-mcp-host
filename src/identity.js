@@ -37,7 +37,7 @@ async function findActiveUser(env, userId) {
   const row = await env.MCP_IDENTITY_DB.prepare(
     `SELECT user_id, role, status, service, email FROM identity_users WHERE user_id = ?`
   ).bind(userId).first();
-  if (!row || row.status !== 'active') return null;
+  if (!row || row.status !== 'active' || !['mcp-host', 'ladder'].includes(row.service)) return null;
   return { userId: row.user_id, role: row.role, service: row.service, email: row.email, keyHash: null };
 }
 
