@@ -378,6 +378,20 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
   assert.equal(invocationList.status, 200);
   assert.deepEqual((await invocationList.json()).result.tools.map((tool) => tool.name), ['registry.fixture_read']);
 
+  const apiRunId = `run_${'a'.repeat(64)}_${'b'.repeat(24)}`;
+  const apiProof = await signProof({ runId: apiRunId, sub: apiRunId });
+  const apiInvocation = await request({
+    ...baseScope,
+    'x-mcp-operation': 'invocation',
+    'x-mcp-scope': 'registry:fixture-read',
+    'x-mcp-run-id': apiRunId,
+    'x-mcp-run-binding': apiProof,
+  }, { jsonrpc: '2.0', id: 'api-run-call', method: 'tools/call', params: { name: 'registry.fixture_read', arguments: {} } });
+  assert.equal(apiInvocation.status, 200);
+  assert.deepEqual(JSON.parse((await apiInvocation.json()).result.content[0].text), {
+    marker: 'registry-fixture-marker-160-v1', profileId: 'integration-telegram-ux-v1', taskId: 'task-160', runId: apiRunId,
+  });
+
   const denyInvocation = async (headers, proof) => {
     const response = await request({ ...baseScope, 'x-mcp-operation': 'invocation', 'x-mcp-scope': 'registry:fixture-read', 'x-mcp-run-id': 'run_01234567-89ab-cdef-0123-456789abcdef', ...headers, ...(proof ? { 'x-mcp-run-binding': proof } : {}) },
       { jsonrpc: '2.0', id: 'denied-proof', method: 'tools/call', params: { name: 'registry.fixture_read' } });

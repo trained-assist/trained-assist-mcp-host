@@ -146,7 +146,9 @@ function hostFor(env) {
       } else {
         if (requestedOperation !== 'invocation' || headers?.get?.('x-mcp-scope') !== executionScope) return null;
         runId = headers?.get?.('x-mcp-run-id') || '';
-        if (!/^run_[a-f0-9-]{36}$/.test(runId)) return null;
+        // VM runs use UUIDs; the sandbox Runner API uses a task hash and
+        // attempt ID. Both remain bound to the signed proof below.
+        if (!/^run_(?:[a-f0-9-]{36}|[a-f0-9]{64}_[a-f0-9]{24})$/.test(runId)) return null;
         if (method !== 'tools/call' && method !== 'tools/list') return null;
         const catalogue = cachedHost?.catalog.digest;
         if (!catalogue) return null;
