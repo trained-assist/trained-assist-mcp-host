@@ -2,11 +2,13 @@ import hostModule from './index.js';
 import identityModule from './identity.js';
 import humanModule from './human.js';
 import googleDocsModule from './google-docs.js';
+import walletModule from './zerocreds-wallet.js';
 
 const { createHost } = hostModule;
 const { initTables, createUser, issueApiKey, revokeApiKey, verifyKey, setUserStatus } = identityModule;
 const { createHumanProvider, humanScope, verifyAgentRunScope, HUMAN_SERVICE, HUMAN_AUDIENCE } = humanModule;
 const { finishGoogleAuthorization } = googleDocsModule;
+const { createZeroCredsWalletProvider, walletProfileFor, resolveWalletBindings } = walletModule;
 
 const audience = HUMAN_AUDIENCE;
 
@@ -15,13 +17,17 @@ let cachedHumanHost = null;
 function humanHostFor(env) {
   if (cachedHumanHost && cachedHumanHost.env === env) return cachedHumanHost.host;
   const host = createHost({
-    providers: [createHumanProvider(env)],
+    providers: [createHumanProvider(env), createZeroCredsWalletProvider(env)],
     audience,
+    resolveBindings: async ({ context, providerId, required }) => {
+      if (providerId !== 'zerocreds-wallet') return {};
+      return resolveWalletBindings({ env, context, required });
+    },
     authenticate: async ({ authorization, headers }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
       if (!match) return null;
       const human = await verifyKey(env, match[1], { acceptedServices: [HUMAN_SERVICE, 'ladder'] });
-      if (human) return humanScope(human, host.catalog.digest);
+      if (human) return humanScope(human, host.catalog.digest, await walletProfileFor(env, human));
       return verifyAgentRunScope({ authorization, headers, env, catalogDigest: host.catalog.digest });
     },
   });

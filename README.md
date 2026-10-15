@@ -6,9 +6,17 @@ This repository has no runtime dependency on `trained-assist-agent`, its runner,
 
 The current personal-key connection plan and first-user setup are documented in [AUTH-ARCHITECTURE.md](AUTH-ARCHITECTURE.md) and [USER-AUTH-MVP.md](USER-AUTH-MVP.md). The user sandbox Worker is separate from the machine test Worker. Its product catalog contains `identity.whoami`, `google_docs.connect`, and `google_docs.get_document`; machine/recruiter fixture tools are confined to the separate test Worker. The human gateway includes an optional Google Docs read-only provider; live OAuth requires deployment secrets and an exact registered callback URL.
 
+### ZeroCreds wallet tools
+
+The human Worker composes ZeroCreds provider version `1.0.0` from the immutable Git commit in `package.json`. The complete human catalog digest is `483e6d2f949b32c05a70186f4e25aba291b1483eeb0bdc9a7a3bca4b9b7cdf11`; update any Runner catalog pin when rolling out this provider. It registers `zerocreds_wallet_form_create`, `zerocreds_wallet_form_status`, `zerocreds_wallet_connection_status`, and `zerocreds_wallet_connection_revoke`. The host does not copy wallet handlers or accept owner, profile, destination, or credential values as tool arguments.
+
+The wallet tools are hidden unless all of these sandbox bindings are configured: `ZEROCREDS_WALLET_API_URL` (HTTPS ZeroCreds Node API endpoint), `ZEROCREDS_WALLET_ISSUER`, `ZEROCREDS_WALLET_KEY_ID`, `ZEROCREDS_WALLET_SIGNING_KEY` (secret Ed25519 private JWK), and KV namespace `ZEROCREDS_WALLET_PROFILES`. KV values are operator-authorized JSON records keyed by the verified MCP user ID, for example `{"owner_id":"owner_123","profile_id":"profile_default"}`. Map only users who have explicitly authorized the ZeroCreds profile. ZeroCreds must trust the matching `(issuer, key ID, profile ID)` and map that profile to its named destination. The Node API and its assertion issuer configuration must be deployed in the same sandbox before listing tools.
+
+For each invocation the host signs an operation-specific human assertion with a unique `jti` and a five-minute maximum lifetime. The provider sends it only to the configured ZeroCreds API. ZeroCreds validates the signature and scope, resolves its configured destination, and claims the `jti` digest in its wallet Worker. The host never receives the Worker service token or OpenBao credentials. Roll back by removing the provider's profile KV mapping or any required issuer/API setting; the four names disappear from the next tools/list response. Production must remain disabled until ZeroCreds production release, identity/profile authorization, destination mapping, legacy-client migration, and an end-to-end agent run are completed.
+
 ## Runtime
 
-Node.js 22 or newer; no third-party runtime dependencies.
+Node.js 22 or newer; the deployed human Worker additionally bundles the pinned ZeroCreds provider package.
 
 ```js
 const { createHost } = require('trained-assist-mcp-host');

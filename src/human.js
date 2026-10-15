@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { createGoogleDocsProvider } = require('./google-docs');
 const { findActiveUser } = require('./identity');
+const { TOOL_NAMES } = require('./zerocreds-wallet');
 
 const HUMAN_SERVICE = 'mcp-host';
 const HUMAN_AUDIENCE = 'trained-assist:mcp:user';
@@ -14,10 +15,10 @@ const AGENT_POLICY = 'mem-gpt-user-run-v1';
 const DEFAULT_USER_CATALOGUE = 'mem-gpt-user-catalogue-v1';
 const MAX_AGENT_GRANT_SECONDS = 2 * 60 * 60;
 
-function humanToolsForRole(_role) {
+function humanToolsForRole(_role, walletAuthorized = false) {
   // The product user catalog contains only real user capabilities. Test fixtures
   // are served by worker.mjs and must never leak into this user-facing gateway.
-  return ['identity.whoami', 'google_docs.connect', 'google_docs.get_document'];
+  return ['identity.whoami', 'google_docs.connect', 'google_docs.get_document', ...(walletAuthorized ? TOOL_NAMES : [])];
 }
 
 function makeTrace(identity, toolName, nonce) {
@@ -60,7 +61,7 @@ handler: async (args, context) => {
   };
 }
 
-function humanScope(identity, catalogDigest) {
+function humanScope(identity, catalogDigest, walletProfile = null) {
   const now = Date.now();
   return {
     profileId: `user:${identity.userId}:default`,
@@ -76,8 +77,9 @@ function humanScope(identity, catalogDigest) {
       email: identity.email,
       service: identity.service,
       keyHash: identity.keyHash,
+      ...(walletProfile && { walletProfile }),
     },
-    allowedTools: humanToolsForRole(identity.role),
+    allowedTools: humanToolsForRole(identity.role, Boolean(walletProfile)),
     audience: HUMAN_AUDIENCE,
     operationId: 'user',
     expiresAt: now + 15 * 60 * 1000,
