@@ -6,10 +6,10 @@ const { createGoogleDocsProvider } = require('./google-docs');
 const HUMAN_SERVICE = 'mcp-host';
 const HUMAN_AUDIENCE = 'trained-assist:registry-mcp:test';
 
-function humanToolsForRole(role) {
-  const tools = ['identity.whoami', 'google_docs.connect', 'google_docs.get_document'];
-  if (role === 'recruiter' || role === 'admin') tools.push('recruiter.fixture_read');
-  return tools;
+function humanToolsForRole(_role) {
+  // The product user catalog contains only real user capabilities. Test fixtures
+  // are served by worker.mjs and must never leak into this user-facing gateway.
+  return ['identity.whoami', 'google_docs.connect', 'google_docs.get_document'];
 }
 
 function makeTrace(identity, toolName, nonce) {
@@ -43,23 +43,6 @@ handler: async (args, context) => {
             role: context.identity.role,
             email: context.identity.email,
             service: context.identity.service,
-            trace,
-          };
-        },
-      },
-      {
-        name: 'recruiter.fixture_read',
-        description: 'Read a deterministic synthetic candidate marker (recruiter only).',
-        inputSchema: { type: 'object', properties: { nonce: { type: 'string' } }, additionalProperties: false },
-        requiredBindings: [],
-        providerId: 'identity-human',
-        handler: async (args, context) => {
-          const nonce = args?.nonce || null;
-          const trace = makeTrace(context.identity, 'recruiter.fixture_read', nonce);
-          return {
-            marker: 'recruiter-fixture-marker-v1',
-            profileId: context.profileId,
-            taskId: context.taskId,
             trace,
           };
         },
