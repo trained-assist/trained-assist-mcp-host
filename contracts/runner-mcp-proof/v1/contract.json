@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Run-bound authorization proof for remote MCP invocation",
+  "runId": {
+    "minLength": 1,
+    "maxLength": 93,
+    "patterns": [
+      "^run_[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$",
+      "^run_[a-f0-9]{64}_[a-f0-9]{24}$"
+    ],
+    "acceptedExamples": [
+      "run_01234567-89ab-cdef-0123-456789abcdef",
+      "run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "rejectedExamples": ["", "run_123", "run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbb", "run_01234567-89ab-cdef-0123-456789abcde/", "run_01234567-89ab-cdef-0123-456789abcdef\n", "run_aaaaaaaa-aaaaaaaa-aaaa-aaaa-aaaaaaaaaaaa"]
+  },
+  "transport": {
+    "operationHeader": "X-MCP-Operation",
+    "operationValue": "invocation",
+    "scopeHeader": "X-MCP-Scope",
+    "runIdHeader": "X-MCP-Run-Id",
+    "taskIdHeader": "X-MCP-User-Task-Id",
+    "proofHeader": "X-MCP-Run-Binding"
+  },
+  "proof": {
+    "format": "JWT",
+    "header": { "alg": "EdDSA", "typ": "JWT" },
+    "issuer": "trained-assist-agent-runner",
+    "audience": "trained-assist:registry-mcp:test",
+    "requiredClaims": [
+      "allowedTools", "aud", "bindingRef", "catalogueVersion", "exp", "iat", "iss",
+      "policyVersion", "principalId", "profileId", "registryDigest", "runId", "scope",
+      "serverId", "sub", "userTaskId"
+    ],
+    "bindings": {
+      "runIdClaim": "runId",
+      "subjectClaim": "sub",
+      "taskIdClaim": "userTaskId"
+    },
+    "maxLifetimeSeconds": 86400
+  },
+  "testTool": {
+    "serverId": "trained-assist-registry-test",
+    "tool": "registry.fixture_read",
+    "scope": "registry:fixture-read",
+    "marker": "registry-fixture-marker-160-v1",
+    "profileId": "integration-telegram-ux-v1",
+    "principalId": "integration-telegram-ux-v1",
+    "taskId": "task-160",
+    "bindingRef": "registry-mcp-test-160-read",
+    "policyVersion": "registry-fixture-policy-v1",
+    "catalogueVersion": "registry-fixture-catalogue-v1"
+  }
+}

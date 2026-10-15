@@ -30,3 +30,48 @@ jobs:
             exit 1
           fi
       - run: npm pack --dry-run
+
+  cross-repo-proof-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: contract
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out Runner API
+        uses: actions/checkout@v4
+        with:
+          repository: trained-assist/ai-agent-runner
+          ref: main
+          path: runner
+      - name: Check out GHA gateway
+        uses: actions/checkout@v4
+        with:
+          repository: vovalikessmoothy-png/opencode-gha-runner
+          ref: main
+          path: gha-runner
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: runner/package-lock.json
+      - run: npm ci
+        working-directory: runner
+      - name: Check Runner proof generation against this contract revision
+        run: npx vitest run test/cloudflare-run-coordinator.test.ts -t 'attaches a run-bound proof and bearer only for the pinned Registry MCP principal'
+        working-directory: runner
+        env:
+          MCP_RUN_PROOF_CONTRACT: ${{ github.workspace }}/contracts/runner-mcp-proof/v1/contract.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: gha-runner/package-lock.json
+      - run: npm ci
+        working-directory: gha-runner
+      - run: npm run build
+        working-directory: gha-runner
+      - name: Check gateway pass-through against this contract revision
+        run: node --test --test-name-pattern='shared MCP proof' dist/test/contracts.test.js dist/test/runner.test.js
+        working-directory: gha-runner
+        env:
+          MCP_RUN_PROOF_CONTRACT: ${{ github.workspace }}/contracts/runner-mcp-proof/v1/contract.json
