@@ -23,6 +23,8 @@ jobs:
     environment: sandbox
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      MCP_RUNNER_AUTH_TOKEN: ${{ secrets.MCP_USER_AUTH_TOKEN }}
+      MCP_RUNNER_PUBLIC_JWK: ${{ vars.MCP_USER_RUNNER_PUBLIC_JWK }}
       DATABASE_NAME: trained-assist-llm-ladder-trace
     steps:
       - uses: actions/checkout@v4
@@ -41,9 +43,22 @@ jobs:
           DATABASE_ID: ${{ steps.d1.outputs.database_id }}
         run: |
           node -e "const fs=require('fs');const p='wrangler.user.jsonc';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.d1_databases[0].database_id=process.env.DATABASE_ID;fs.writeFileSync(p,JSON.stringify(c,null,2))"
+      - name: Configure optional sandbox Runner delegation
+        run: |
+          if [ -n "$MCP_RUNNER_AUTH_TOKEN" ] && [ -z "$MCP_RUNNER_PUBLIC_JWK" ] || [ -z "$MCP_RUNNER_AUTH_TOKEN" ] && [ -n "$MCP_RUNNER_PUBLIC_JWK" ]; then
+            echo 'sandbox_runner_mcp_pair_incomplete' >&2
+            exit 1
+          fi
+          if [ -n "$MCP_RUNNER_AUTH_TOKEN" ]; then
+            test "${#MCP_RUNNER_AUTH_TOKEN}" -ge 32
+            node -e "const fs=require('fs');const p='wrangler.user.jsonc';const c=JSON.parse(fs.readFileSync(p,'utf8'));const j=JSON.parse(process.env.MCP_RUNNER_PUBLIC_JWK);if(j.kty!=='OKP'||j.crv!=='Ed25519'||typeof j.x!=='string'||j.d!==undefined)process.exit(1);c.vars.MCP_RUNNER_PUBLIC_JWK=JSON.stringify(j);fs.writeFileSync(p,JSON.stringify(c,null,2))"
+          fi
       - name: Dry run
         if: ${{ inputs.dry_run }}
         run: npx --yes wrangler@4.146.0 deploy --dry-run --config wrangler.user.jsonc
       - name: Deploy sandbox Worker
         if: ${{ inputs.dry_run == false }}
         run: npx --yes wrangler@4.146.0 deploy --config wrangler.user.jsonc
+      - name: Set sandbox Runner transport secret
+        if: ${{ inputs.dry_run == false && env.MCP_RUNNER_AUTH_TOKEN != '' }}
+        run: printf '%s' "$MCP_RUNNER_AUTH_TOKEN" | npx --yes wrangler@4.146.0 secret put MCP_RUNNER_AUTH_TOKEN --config wrangler.user.jsonc

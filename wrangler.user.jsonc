@@ -3,14 +3,21 @@
   "name": "trained-assist-mcp-user-sandbox",
   "main": "src/worker-human.mjs",
   "compatibility_date": "2026-10-06",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "workers_dev": true,
-  "observability": { "enabled": true },
+  "observability": {
+    "enabled": true
+  },
   "d1_databases": [
     {
       "binding": "MCP_IDENTITY_DB",
       "database_name": "trained-assist-llm-ladder-trace",
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
-  ]
+  ],
+  "vars": {
+    "MCP_USER_CATALOGUE_VERSION": "mem-gpt-user-catalogue-v1"
+  }
 }

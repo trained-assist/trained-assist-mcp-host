@@ -5,7 +5,7 @@ import googleDocsModule from './google-docs.js';
 
 const { createHost } = hostModule;
 const { initTables, createUser, issueApiKey, revokeApiKey, verifyKey, setUserStatus } = identityModule;
-const { createHumanProvider, humanScope, HUMAN_SERVICE, HUMAN_AUDIENCE } = humanModule;
+const { createHumanProvider, humanScope, verifyAgentRunScope, HUMAN_SERVICE, HUMAN_AUDIENCE } = humanModule;
 const { finishGoogleAuthorization } = googleDocsModule;
 
 const audience = HUMAN_AUDIENCE;
@@ -17,11 +17,12 @@ function humanHostFor(env) {
   const host = createHost({
     providers: [createHumanProvider(env)],
     audience,
-    authenticate: async ({ authorization }) => {
+    authenticate: async ({ authorization, headers }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
       if (!match) return null;
       const human = await verifyKey(env, match[1], { acceptedServices: [HUMAN_SERVICE, 'ladder'] });
-      return human ? humanScope(human, host.catalog.digest) : null;
+      if (human) return humanScope(human, host.catalog.digest);
+      return verifyAgentRunScope({ authorization, headers, env, catalogDigest: host.catalog.digest });
     },
   });
   cachedHumanHost = { host, env };

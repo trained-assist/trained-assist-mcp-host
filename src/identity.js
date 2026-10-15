@@ -32,6 +32,15 @@ async function verifyKey(env, providedKey, options = {}) {
   return { userId: row.user_id, role: row.role, email: row.email, service: row.user_service, keyHash: row.key_hash };
 }
 
+async function findActiveUser(env, userId) {
+  if (!env.MCP_IDENTITY_DB || typeof userId !== 'string' || !userId) return null;
+  const row = await env.MCP_IDENTITY_DB.prepare(
+    `SELECT user_id, role, status, service, email FROM identity_users WHERE user_id = ?`
+  ).bind(userId).first();
+  if (!row || row.status !== 'active' || !['mcp-host', 'ladder'].includes(row.service)) return null;
+  return { userId: row.user_id, role: row.role, service: row.service, email: row.email, keyHash: null };
+}
+
 async function createUser(env, { userId, email, role = 'user', service = DEFAULT_SERVICE, status = 'active' }) {
   if (!env.MCP_IDENTITY_DB) throw new Error('D1 binding MCP_IDENTITY_DB not configured');
   const now = Date.now();
@@ -79,6 +88,7 @@ async function initTables() {
 module.exports = {
   hashKey,
   verifyKey,
+  findActiveUser,
   createUser,
   issueApiKey,
   revokeApiKey,
