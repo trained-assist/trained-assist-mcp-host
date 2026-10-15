@@ -131,7 +131,7 @@ async function verifyAgentRunScope({ authorization, headers, env, catalogDigest,
   if (claims.iss !== AGENT_ISSUER || claims.aud !== HUMAN_AUDIENCE || claims.serverId !== AGENT_SERVER
       || claims.bindingRef !== AGENT_BINDING || claims.scope !== AGENT_SCOPE || claims.policyVersion !== AGENT_POLICY
       || claims.catalogueVersion !== expectedVersion || claims.catalogueDigest !== catalogDigest
-      || claims.runId !== runId || claims.userTaskId !== userTaskId || claims.profileId !== profileId
+      || claims.sub !== claims.runId || claims.runId !== runId || claims.userTaskId !== userTaskId || claims.profileId !== profileId
       || typeof claims.userId !== 'string' || !claims.userId || typeof claims.runId !== 'string' || !claims.runId
       || typeof claims.userTaskId !== 'string' || !claims.userTaskId || typeof claims.profileId !== 'string' || !claims.profileId
       || !Number.isSafeInteger(claims.ownerGeneration) || claims.ownerGeneration < 1
