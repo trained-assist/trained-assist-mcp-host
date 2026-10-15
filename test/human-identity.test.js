@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const { createHost } = require('../src');
 const identity = require('../src/identity');
 const { createHumanProvider, humanScope, humanToolsForRole, HUMAN_SERVICE } = require('../src/human');
+const { createZeroCredsWalletProvider } = require('../src/zerocreds-wallet');
 const { AGENT_BINDING, AGENT_ISSUER, AGENT_POLICY, AGENT_SCOPE, AGENT_SERVER, DEFAULT_USER_CATALOGUE, HUMAN_AUDIENCE } = require('../src/human');
 const { createFakeD1, applyMigrations } = require('../test/helpers/fake-d1');
 
@@ -194,7 +195,7 @@ test('runner-signed run grant exposes only its scoped user tools without a perso
   await identity.createUser(env, { userId: 'user-agent', email: 'agent@example.com', role: 'user' });
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
   env.MCP_RUNNER_PUBLIC_JWK = JSON.stringify(publicKey.export({ format: 'jwk' }));
-  const host = createHost({ providers: [createHumanProvider(env)], audience: HUMAN_AUDIENCE });
+  const host = createHost({ providers: [createHumanProvider(env), createZeroCredsWalletProvider(env)], audience: HUMAN_AUDIENCE });
   const now = Math.floor(Date.now() / 1000);
   const claims = {
     iss: AGENT_ISSUER, aud: HUMAN_AUDIENCE, sub: 'run_12345678-1234-1234-1234-123456789abc',
