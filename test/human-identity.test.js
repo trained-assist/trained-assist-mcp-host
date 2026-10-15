@@ -57,15 +57,15 @@ test('initialize returns tools capability', async () => {
   assert.equal(response.result.capabilities.tools !== undefined, true);
 });
 
-test('recruiter key sees whoami and recruiter.fixture_read', async () => {
+test('recruiter key sees the product user catalog without synthetic fixture tools', async () => {
   const { host, env } = await setup();
   await seedUser(env, { userId: 'user-rec', email: 'rec@example.com', role: 'recruiter' });
   const { key } = await identity.issueApiKey(env, { userId: 'user-rec', label: 'rec-key' });
   const response = await listTools(host, `Bearer ${key}`);
-  assert.deepEqual(toolNames(response).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
+  assert.deepEqual(toolNames(response).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami']);
 });
 
-test('non-recruiter key sees whoami only and not the recruiter tool', async () => {
+test('non-recruiter key sees the same product catalog without synthetic fixture tools', async () => {
   const { host, env } = await setup();
   await seedUser(env, { userId: 'user-sales', email: 'sales@example.com', role: 'sales' });
   const { key } = await identity.issueApiKey(env, { userId: 'user-sales', label: 'sales-key' });
@@ -88,24 +88,14 @@ test('whoami returns caller identity and trusted trace without secrets', async (
   assert.equal(JSON.stringify(payload).includes(key), false);
 });
 
-test('recruiter fixture call returns deterministic result with nonce in trace', async () => {
+test('synthetic fixture tool is unavailable in the user-facing product catalog', async () => {
   const { host, env } = await setup();
   await seedUser(env, { userId: 'user-rec', email: 'rec@example.com', role: 'recruiter' });
   const { key } = await identity.issueApiKey(env, { userId: 'user-rec', label: 'rec-key' });
-  const response = await callTool(host, `Bearer ${key}`, 'recruiter.fixture_read', { nonce: 'nonce-253-a' });
-  const payload = JSON.parse(response.result.content[0].text);
-  assert.equal(payload.marker, 'recruiter-fixture-marker-v1');
-  assert.equal(payload.trace.nonce, 'nonce-253-a');
-  assert.equal(payload.trace.userId, 'user-rec');
-});
-
-test('cross-role: sales key is denied the recruiter tool before execution', async () => {
-  const { host, env } = await setup();
-  await seedUser(env, { userId: 'user-sales', email: 'sales@example.com', role: 'sales' });
-  const { key } = await identity.issueApiKey(env, { userId: 'user-sales', label: 'sales-key' });
-  const response = await callTool(host, `Bearer ${key}`, 'recruiter.fixture_read', { nonce: 'x' });
+  const response = await callTool(host, `Bearer ${key}`, 'recruiter.fixture_read', { nonce: 'fixture-probe' });
   assert.equal(response.result.isError, true);
-  assert.equal(JSON.stringify(response).includes('recruiter-fixture-marker-v1'), false);
+  assert.match(response.result.content[0].text, /Unknown tool/);
+  assert.equal(JSON.stringify(response).includes('fixture-marker'), false);
 });
 
 test('bad key is denied without identity', async () => {
@@ -143,7 +133,7 @@ test('Ladder personal key is accepted on the MCP gateway', async () => {
   await seedUser(env, { userId: 'user-ladder', email: 'ladder@example.com', role: 'recruiter', service: 'ladder' });
   const { key } = await identity.issueApiKey(env, { userId: 'user-ladder', label: 'ladder-key', service: 'ladder' });
   const response = await listTools(host, `Bearer ${key}`);
-  assert.deepEqual(toolNames(response).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
+  assert.deepEqual(toolNames(response).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami']);
 });
 
 test('expired key is denied', async () => {
@@ -155,9 +145,9 @@ test('expired key is denied', async () => {
 });
 
 test('role policy keeps recruiter tool out of non-recruiter catalog', () => {
-  assert.deepEqual(humanToolsForRole('recruiter').sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
+  assert.deepEqual(humanToolsForRole('recruiter').sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami']);
   assert.deepEqual(humanToolsForRole('user').sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami']);
-  assert.deepEqual(humanToolsForRole('admin').sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
+  assert.deepEqual(humanToolsForRole('admin').sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami']);
 });
 
 test('human worker fetch path serves tools/list and tools/call over HTTP', async () => {
@@ -178,7 +168,7 @@ test('human worker fetch path serves tools/list and tools/call over HTTP', async
   );
   const listedBody = await listed.json();
   assert.equal(listed.status, 200);
-  assert.deepEqual(listedBody.result.tools.map((t) => t.name).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami', 'recruiter.fixture_read']);
+  assert.deepEqual(listedBody.result.tools.map((t) => t.name).sort(), ['google_docs.connect', 'google_docs.get_document', 'identity.whoami']);
 
   const called = await humanWorker.fetch(
     new Request('https://human.example/mcp', {
@@ -189,9 +179,9 @@ test('human worker fetch path serves tools/list and tools/call over HTTP', async
     env,
   );
   const calledBody = await called.json();
-  const payload = JSON.parse(calledBody.result.content[0].text);
-  assert.equal(payload.trace.nonce, 'http-nonce');
-  assert.equal(payload.trace.userId, 'user-rec');
+  assert.equal(calledBody.result.isError, true);
+  assert.match(calledBody.result.content[0].text, /Unknown tool/);
+  assert.equal(JSON.stringify(calledBody).includes('fixture-marker'), false);
 });
 
 test('machine fixture worker catalog digest is unchanged by the human worker', async () => {
