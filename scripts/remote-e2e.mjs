@@ -66,7 +66,7 @@ async function post(message, operation, runBinding = null) {
 
 const discoveryId = `${taskId}:discovery`;
 const discovery = await post({ jsonrpc: '2.0', id: discoveryId, method: 'tools/list', params: {} }, 'discovery');
-console.error('discovery tools:', JSON.stringify(discovery.body?.result?.tools?.map((t) => t.name)));
+console.error('discovery response:', JSON.stringify(discovery.body));
 if (!discovery.response.ok || discovery.body?.jsonrpc !== '2.0' || discovery.body?.id !== discoveryId
     || !Array.isArray(discovery.body?.result?.tools)
     || !Array.isArray(discovery.body.result.tools) || !discovery.body.result.tools.some((t) => t?.name === toolName)) {
