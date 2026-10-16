@@ -7,9 +7,9 @@ const path = require('node:path');
 // floating branch; this value is also validated by the domain adapter.
 const SEARCH_SKILL_COMMIT = '069ba8b2e6f8b02c4e9241fcb1514d3114a68466';
 
-const vendorRoot = path.join(__dirname, '..', 'vendor', 'trained-assist-search-skill', SEARCH_SKILL_COMMIT, 'src');
-const hostProviderModule = require(path.join(vendorRoot, 'host-provider.js'));
-const serperModule = require(path.join(vendorRoot, 'mcp-skills', 'tools', '99-search-serper.js'));
+const vendorRoot = './vendor/trained-assist-search-skill/' + SEARCH_SKILL_COMMIT + '/src';
+const hostProviderModule = require(vendorRoot + '/host-provider.js');
+const serperModule = require(vendorRoot + '/mcp-skills/tools/99-search-serper.js');
 
 const createHostProvider = hostProviderModule.createHostProvider;
 const MAX_QUERY_CHARS = hostProviderModule.MAX_QUERY_CHARS;
