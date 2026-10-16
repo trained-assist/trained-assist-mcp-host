@@ -78,6 +78,31 @@ test('trusted run scope filters tools/list and reaches the provider call', async
   assert.deepEqual(JSON.parse(called.result.content[0].text), { marker: 'proof', profileId: 'profile_a', taskId: 'task-a' });
 });
 
+test('tools/call forwards valid provider text and image content blocks', async () => {
+  const providersWithImage = [{
+    id: 'fixture',
+    version: '1.0.0-test',
+    tools: [{
+      name: 'read_marker',
+      description: 'Return a text caption and image.',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async () => ({ content: [
+        { type: 'text', text: 'Current page screenshot' },
+        { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+      ] }),
+    }],
+  }];
+  const { host, authorization } = setup({ providers: providersWithImage });
+  const called = await host.protocol.handle({
+    message: { jsonrpc: '2.0', id: 'image-call', method: 'tools/call', params: { name: 'read_marker', arguments: {} } },
+    authorization,
+  });
+  assert.deepEqual(called.result.content, [
+    { type: 'text', text: 'Current page screenshot' },
+    { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+  ]);
+});
+
 test('missing and malformed run scopes cannot list or call tools', async () => {
   const { host, credentials } = setup();
   const message = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
