@@ -68,7 +68,7 @@ const discoveryId = `${taskId}:discovery`;
 const discovery = await post({ jsonrpc: '2.0', id: discoveryId, method: 'tools/list', params: {} }, 'discovery');
 if (!discovery.response.ok || discovery.body?.jsonrpc !== '2.0' || discovery.body?.id !== discoveryId
     || !Array.isArray(discovery.body?.result?.tools)
-    || discovery.body.result.tools.length !== 3 || !discovery.body.result.tools.some((t) => t?.name === toolName) {
+    || discovery.body.result.tools.length !== 3 || !discovery.body.result.tools.some((t) => t?.name === toolName)) {
   throw new Error(`CP-style discovery failed (HTTP ${discovery.response.status})`);
 }
 
