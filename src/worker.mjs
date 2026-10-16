@@ -1,8 +1,10 @@
 import hostModule from './index.js';
 import identityModule from './identity.js';
+import searchModule from './search.js';
 import proofContract from '../contracts/runner-mcp-proof/v1/contract.cjs';
 
 const { createHost } = hostModule;
+const { createSearchProvider } = searchModule;
 const { initTables, createUser, issueApiKey, revokeApiKey, verifyKey } = identityModule;
 const serverId = proofContract.testTool.serverId;
 const toolName = proofContract.testTool.tool;
@@ -14,6 +16,8 @@ const catalogueVersion = proofContract.testTool.catalogueVersion;
 const executionScope = proofContract.testTool.scope;
 const fixtureMarker = proofContract.testTool.marker;
 const runIdPatterns = proofContract.runId.patterns.map((pattern) => new RegExp(pattern));
+const searchSource = '069ba8b2e6f8b02c4e9241fcb1514d3114a68466';
+const permittedTools = [proofContract.testTool.tool, 'search_serp_free', 'search_serper'];
 const required = [
   'MCP_TEST_AUTH_TOKEN',
   'MCP_TEST_PRINCIPAL_ID',
@@ -99,7 +103,8 @@ async function verifyRunBinding(token, env, expected) {
         || claims[identityBindings.taskIdClaim] !== expected.taskId || claims.profileId !== profileId
         || claims.principalId !== env.MCP_TEST_PRINCIPAL_ID || claims.serverId !== serverId
         || claims.bindingRef !== bindingRef || !Array.isArray(claims.allowedTools)
-        || claims.allowedTools.length !== 1 || claims.allowedTools[0] !== toolName
+        || !claims.allowedTools.length || new Set(claims.allowedTools).size !== claims.allowedTools.length
+        || claims.allowedTools.some((name) => typeof name !== 'string' || !permittedTools.includes(name))
         || claims.scope !== expected.scope
         || claims.policyVersion !== policyVersion || claims.catalogueVersion !== catalogueVersion
         || claims.registryDigest !== expected.registryDigest
@@ -131,7 +136,13 @@ export const machineProvider = {
 function hostFor(env) {
   if (cachedHost && cachedEnv === env) return cachedHost;
   cachedHost = createHost({
-    providers: [machineProvider],
+    providers: [machineProvider, createSearchProvider({
+      version: searchSource,
+      searchOrigin: (typeof env.MCP_SEARCH_ORIGIN === 'string' && env.MCP_SEARCH_ORIGIN.trim())
+        ? env.MCP_SEARCH_ORIGIN.trim()
+        : ((typeof env.SEARCH_ORIGIN === 'string' && env.SEARCH_ORIGIN.trim()) ? env.SEARCH_ORIGIN.trim() : 'https://search.test.invalid'),
+      serperApiKey: typeof env.SERPER_API_KEY === 'string' ? env.SERPER_API_KEY : '',
+    })],
     audience,
     authenticate: async ({ authorization, headers, method }) => {
       const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
@@ -143,6 +154,7 @@ function hostFor(env) {
       if (!taskId || taskId.length > 200 || requestProfileId !== profileId) return null;
       let runId;
       let proofExpiry;
+      let allowedTools = [...permittedTools];
       if (requestedOperation === 'discovery') {
         if (headers?.get?.(proofContract.transport.runIdHeader) || headers?.get?.(proofContract.transport.proofHeader)
             || headers?.get?.(proofContract.transport.scopeHeader)) return null;
@@ -150,6 +162,7 @@ function hostFor(env) {
         const requestPrincipalId = headers?.get?.('x-mcp-principal-id') || '';
         if (method !== 'tools/list' || requestGeneration !== generation || requestPrincipalId !== env.MCP_TEST_PRINCIPAL_ID) return null;
         runId = undefined;
+        allowedTools = [...permittedTools];
       } else {
         if (requestedOperation !== proofContract.transport.operationValue
             || headers?.get?.(proofContract.transport.scopeHeader) !== executionScope) return null;
@@ -164,6 +177,7 @@ function hostFor(env) {
         const proof = await verifyRunBinding(headers?.get?.(proofContract.transport.proofHeader), env, { runId, taskId, scope: executionScope, registryDigest: catalogue });
         if (!proof) return null;
         proofExpiry = proof.exp * 1000;
+        allowedTools = Array.isArray(proof.allowedTools) ? [...proof.allowedTools] : [proofContract.testTool.tool];
       }
       return {
         taskId,
@@ -173,7 +187,7 @@ function hostFor(env) {
         runId,
         operationId: requestedOperation === 'discovery' ? 'discovery' : 'invocation',
         bindingRef,
-        allowedTools: [toolName],
+        allowedTools: allowedTools.length ? [...allowedTools] : [...permittedTools],
         policyVersion,
         registryDigest: cachedHost?.catalog.digest,
         expiresAt: requestedOperation === 'discovery'

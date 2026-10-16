@@ -9,7 +9,7 @@ const bindingRef = 'registry-mcp-test-160-read';
 const toolName = 'registry.fixture_read';
 const policyVersion = 'registry-fixture-policy-v1';
 const catalogueVersion = 'registry-fixture-catalogue-v1';
-const registryDigest = '129ab5033964c3ed5be47414711026cc2469b3d9af90ce83ee071cba7f005ea9';
+const registryDigest = 'fcfc1bda07f5ba348a97002489fbb621c495394ca84b3d2aeb0a1ec71cb55c7b';
 const audience = 'trained-assist:registry-mcp:test';
 const scope = 'registry:fixture-read';
 const token = process.env.MCP_TEST_AUTH_TOKEN;
@@ -68,7 +68,7 @@ const discoveryId = `${taskId}:discovery`;
 const discovery = await post({ jsonrpc: '2.0', id: discoveryId, method: 'tools/list', params: {} }, 'discovery');
 if (!discovery.response.ok || discovery.body?.jsonrpc !== '2.0' || discovery.body?.id !== discoveryId
     || !Array.isArray(discovery.body?.result?.tools)
-    || discovery.body.result.tools.length !== 1 || discovery.body.result.tools[0]?.name !== toolName) {
+    || discovery.body.result.tools.length !== 3 || !discovery.body.result.tools.some((t) => t?.name === toolName) {
   throw new Error(`CP-style discovery failed (HTTP ${discovery.response.status})`);
 }
 

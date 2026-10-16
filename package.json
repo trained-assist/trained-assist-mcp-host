@@ -8,17 +8,25 @@
     "./protocol": "./src/protocol.js",
     "./catalog": "./src/catalog.js",
     "./human": "./src/human.js",
-    "./identity": "./src/identity.js"
+    "./identity": "./src/identity.js",
+    "./search": "./src/search.js",
+    "./search-provider": "./src/search-provider.js",
+    "./host-provider": "./src/host-provider.js"
   },
-  "files": ["src", "README.md"],
+  "files": [
+    "src",
+    "README.md"
+  ],
   "description": "Standalone MCP host for Trained Assist providers",
   "type": "commonjs",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@zerocreds/mcp-provider": "git+https://github.com/Zerocreds-com/zerocreds-server.git#fbd6eb10913bb417d99d9e14ba476cb7a32575ad"
   },
   "scripts": {
-    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs && node --check src/worker-human.mjs && node --check src/worker-unified.mjs && node --check src/human.js && node --check src/zerocreds-wallet.js && node --check src/google-docs.js && node --check src/identity.js && node --check test/helpers/fake-d1.js && node --check test/human-identity.test.js && node --check test/zerocreds-wallet.test.js && node --check scripts/seed-identity-test-users.mjs && node --check scripts/probe-identity-gateway.mjs && node --check scripts/epic253/unseal-seed-keys.mjs && node --check scripts/epic253/mcp-key-proxy.mjs && node --check scripts/epic253/probe-disabled-user.mjs",
+    "check": "node --check src/index.js && node --check src/catalog.js && node --check src/protocol.js && node --check src/http.js && node --check src/fetch.js && node --check src/stdio.js && node --check src/worker.mjs && node --check src/worker-human.mjs && node --check src/worker-unified.mjs && node --check src/human.js && node --check src/zerocreds-wallet.js && node --check src/google-docs.js && node --check src/identity.js && node --check src/search.js && node --check src/search-provider.js && node --check src/search-skill.js && node --check src/trained-assist-search.js && node --check src/host-provider.js && node --check test/helpers/fake-d1.js && node --check test/human-identity.test.js && node --check test/zerocreds-wallet.test.js && node --check test/search-provider.test.js && node --check scripts/seed-identity-test-users.mjs && node --check scripts/probe-identity-gateway.mjs && node --check scripts/epic253/unseal-seed-keys.mjs && node --check scripts/epic253/mcp-key-proxy.mjs && node --check scripts/epic253/probe-disabled-user.mjs",
     "test": "node --test"
   }
 }
