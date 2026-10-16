@@ -349,7 +349,7 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
     'x-mcp-principal-id': proofContract.testTool.principalId,
   }, { jsonrpc: '2.0', id: 'catalogue-1', method: 'tools/list' });
   assert.equal(discovery.status, 200);
-  assert.deepEqual((await discovery.json()).result.tools.map((tool) => tool.name), ['registry.fixture_read']);
+  assert.deepEqual((await discovery.json()).result.tools.map((tool) => tool.name), ['registry.fixture_read', 'search_serp_free', 'search_serper']);
 
   const discoveryNoRunId = await request({ ...baseScope, 'x-mcp-operation': 'discovery', 'x-mcp-generation': '1', 'x-mcp-principal-id': proofContract.testTool.principalId },
     { jsonrpc: '2.0', id: 'catalogue-no-run', method: 'tools/list' });
@@ -370,7 +370,10 @@ test('test Worker separates CP discovery scope from Runner invocation scope', as
   const catalogResponse = await request({ ...baseScope, 'x-mcp-operation': 'discovery', 'x-mcp-generation': '1', 'x-mcp-principal-id': proofContract.testTool.principalId },
     { jsonrpc: '2.0', id: 'digest', method: 'tools/list' });
   // The pinned test catalog digest is returned by the host instance used for this Worker request.
-  workerDigest = (await catalogResponse.json()).result.tools.length ? (await import('../src/index.js')).createHost({ providers: [{ id: 'registry-fixture', version: '1.0.0-test', tools: [{ name: 'registry.fixture_read', description: 'Read the pinned marker from the Registry MCP test fixture.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, requiredBindings: ['registry-mcp-test-160-read'], handler: async () => null }] }] }).catalog.digest : '';
+  workerDigest = (await catalogResponse.json()).result.tools.length ? (await import('../src/index.js')).createHost({ providers: [
+    { id: 'registry-fixture', version: '1.0.0-test', tools: [{ name: 'registry.fixture_read', description: 'Read the pinned marker from the Registry MCP test fixture.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, requiredBindings: ['registry-mcp-test-160-read'], handler: async () => null }] },
+    (await import('../src/search.js')).createSearchProvider({ version: '069ba8b2e6f8b02c4e9241fcb1514d3114a68466', searchOrigin: 'https://search.test.invalid' }),
+  ] }).catalog.digest : '';
 
   const invocation = await request({
     ...baseScope,
