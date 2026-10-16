@@ -16,8 +16,19 @@ let cachedHumanHost = null;
 
 function humanHostFor(env) {
   if (cachedHumanHost && cachedHumanHost.env === env) return cachedHumanHost.host;
+  const walletFetch = env.ZEROCREDS_WALLET_API_SERVICE?.fetch
+    ? async (input, init) => {
+      try {
+        return await env.ZEROCREDS_WALLET_API_SERVICE.fetch(new Request(input, { ...init, redirect: 'manual' }));
+      }
+      catch (error) {
+        console.error('[wallet] internal API request failed', error?.name || 'Error', error?.message || 'unknown');
+        throw error;
+      }
+    }
+    : undefined;
   const host = createHost({
-    providers: [createHumanProvider(env), createZeroCredsWalletProvider(env)],
+    providers: [createHumanProvider(env), createZeroCredsWalletProvider(env, walletFetch)],
     audience,
     resolveBindings: async ({ context, providerId, required }) => {
       if (providerId !== 'zerocreds-wallet') return {};

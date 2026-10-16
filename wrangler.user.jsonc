@@ -13,11 +13,26 @@
   "d1_databases": [
     {
       "binding": "MCP_IDENTITY_DB",
-      "database_name": "trained-assist-llm-ladder-trace",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_name": "trained-assist-mcp-identity",
+      "database_id": "a9241f28-1de0-4cf7-ac8a-7c701de83b26"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "ZEROCREDS_WALLET_PROFILES",
+      "id": "5a1a410cf57d4f498d9f87a866c2441e"
+    }
+  ],
+  "services": [
+    {
+      "binding": "ZEROCREDS_WALLET_API_SERVICE",
+      "service": "zerocreds-wallet-api-sandbox"
     }
   ],
   "vars": {
-    "MCP_USER_CATALOGUE_VERSION": "mem-gpt-user-catalogue-v1"
+    "MCP_USER_CATALOGUE_VERSION": "mem-gpt-user-catalogue-v1",
+    "ZEROCREDS_WALLET_API_URL": "https://zerocreds-wallet-api-sandbox.skillset-apply.workers.dev",
+    "ZEROCREDS_WALLET_ISSUER": "trained-assist-mcp-host-sandbox",
+    "ZEROCREDS_WALLET_KEY_ID": "wallet-sandbox-20261016"
   }
 }
