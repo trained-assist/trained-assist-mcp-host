@@ -6,6 +6,20 @@ const SERVER_INFO = Object.freeze({ name: 'trained-assist-mcp-host', version: '0
 function result(id, value) { return { jsonrpc: '2.0', id, result: value }; }
 function error(id, code, message) { return { jsonrpc: '2.0', id: id ?? null, error: { code, message } }; }
 
+function validProviderContent(output) {
+  if (!output || !Array.isArray(output.content) || output.content.length < 1 || output.content.length > 8) return false;
+  return output.content.every((block) => {
+    if (!block || typeof block !== 'object') return false;
+    if (block.type === 'text') return typeof block.text === 'string' && block.text.length <= 100_000;
+    if (block.type === 'image') {
+      return typeof block.data === 'string' && block.data.length <= 4 * 1024 * 1024
+        && /^image\/(png|jpeg|webp|gif)$/.test(block.mimeType || '')
+        && /^[A-Za-z0-9+/]*={0,2}$/.test(block.data);
+    }
+    return false;
+  });
+}
+
 function createProtocol({ catalog, authenticate = async () => null, authorize = async () => true, resolveBindings = async () => ({}), audience, now = Date.now, timeoutMs = 45_000 }) {
   const pendingSessions = new Map();
   function validateScope(scope, method) {
@@ -123,6 +137,12 @@ function createProtocol({ catalog, authenticate = async () => null, authorize = 
           }, timeoutMs);
         }),
       ]).finally(() => clearTimeout(timer));
+      if (validProviderContent(output)) {
+        return result(id, {
+          content: output.content,
+          ...(output.isError === true ? { isError: true } : {}),
+        });
+      }
       const text = typeof output === 'string' ? output : JSON.stringify(output ?? null);
       return result(id, { content: [{ type: 'text', text } ] });
     } catch (err) {
