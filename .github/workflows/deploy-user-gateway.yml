@@ -25,15 +25,16 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       MCP_RUNNER_AUTH_TOKEN: ${{ secrets.MCP_USER_AUTH_TOKEN }}
       MCP_RUNNER_PUBLIC_JWK: ${{ vars.MCP_USER_RUNNER_PUBLIC_JWK }}
-      DATABASE_NAME: trained-assist-llm-ladder-trace
+      DATABASE_NAME: trained-assist-mcp-identity
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Resolve shared Ladder identity database
+      - name: Resolve isolated MCP identity database
         id: d1
         run: |
+          npx --yes wrangler@4.146.0 d1 create "$DATABASE_NAME" --config wrangler.user.jsonc >/dev/null 2>&1 || true
           database_id=$(npx --yes wrangler@4.146.0 d1 list --json --config wrangler.user.jsonc 2>/dev/null \
             | node -e "const s=require('fs').readFileSync(0,'utf8');try{const l=JSON.parse(s);const a=Array.isArray(l)?l:[l];const d=a.find(x=>x.file_name===process.env.DATABASE_NAME||x.name===process.env.DATABASE_NAME);process.stdout.write(d?d.uuid||d.database_id:'')}catch{}")
           test -n "$database_id"
@@ -43,6 +44,9 @@ jobs:
           DATABASE_ID: ${{ steps.d1.outputs.database_id }}
         run: |
           node -e "const fs=require('fs');const p='wrangler.user.jsonc';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.d1_databases[0].database_id=process.env.DATABASE_ID;fs.writeFileSync(p,JSON.stringify(c,null,2))"
+      - name: Configure identity schema migrations
+        if: ${{ inputs.dry_run == false }}
+        run: npx --yes wrangler@4.146.0 d1 migrations apply "$DATABASE_NAME" --remote --config wrangler.user.jsonc
       - name: Configure optional sandbox Runner delegation
         run: |
           if [ -n "$MCP_RUNNER_AUTH_TOKEN" ] && [ -z "$MCP_RUNNER_PUBLIC_JWK" ] || [ -z "$MCP_RUNNER_AUTH_TOKEN" ] && [ -n "$MCP_RUNNER_PUBLIC_JWK" ]; then
