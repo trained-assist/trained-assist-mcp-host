@@ -4,12 +4,12 @@ const crypto = require('node:crypto');
 const { setUserStatus } = require('./identity');
 
 const MAX_LEASE_MS = 6 * 60 * 60 * 1000;
-const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RUN_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|run_[0-9a-f]{64}_[0-9a-f]{24})$/i;
 const WALLET_ID = /^[A-Za-z0-9_-]{1,100}$/;
 
 function sandboxIdentity(runId) {
   if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new Error('invalid_sandbox_run_id');
-  const compact = runId.toLowerCase().replaceAll('-', '');
+  const compact = crypto.createHash('sha256').update(runId.toLowerCase()).digest('hex').slice(0, 32);
   return { userId: `sbx-${compact}`, profileId: `sbx_${compact}`, email: `sandbox-${compact}@sandbox.invalid` };
 }
 
@@ -33,19 +33,19 @@ async function provisionSandboxUser(env, { runId, expiresAt, now = Date.now() })
   } else {
     const createdAt = now;
     await env.MCP_IDENTITY_DB.prepare(
-      `INSERT INTO identity_users (user_id, email, role, service, status, created_at, updated_at)
+      `INSERT OR IGNORE INTO identity_users (user_id, email, role, service, status, created_at, updated_at)
        VALUES (?, ?, 'user', 'mcp-sandbox-agent', 'active', ?, ?)`
     ).bind(identity.userId, identity.email, createdAt, createdAt).run();
-    try {
-      await env.MCP_IDENTITY_DB.prepare(
-        'INSERT INTO mcp_sandbox_users (run_id, user_id, profile_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
-      ).bind(runId.toLowerCase(), identity.userId, identity.profileId, expiresAt, createdAt).run();
-    } catch (error) {
-      await setUserStatus(env, identity.userId, 'disabled').catch(() => {});
-      throw error;
-    }
+    await env.MCP_IDENTITY_DB.prepare(
+      'INSERT OR IGNORE INTO mcp_sandbox_users (run_id, user_id, profile_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).bind(runId.toLowerCase(), identity.userId, identity.profileId, expiresAt, createdAt).run();
+    const persisted = await env.MCP_IDENTITY_DB.prepare(
+      'SELECT user_id, profile_id, expires_at, revoked_at FROM mcp_sandbox_users WHERE run_id = ?'
+    ).bind(runId.toLowerCase()).first();
+    if (!persisted || persisted.user_id !== identity.userId || persisted.profile_id !== identity.profileId
+        || persisted.expires_at !== expiresAt || persisted.revoked_at !== null) throw new Error('sandbox_run_identity_conflict');
   }
-  const remainingSeconds = Math.floor((expiresAt - now) / 1000);
+  const remainingSeconds = Math.ceil((expiresAt - now) / 1000);
   try {
     await env.ZEROCREDS_WALLET_PROFILES.put(identity.userId,
       JSON.stringify({ owner_id: ownerId, profile_id: identity.profileId }), { expirationTtl: remainingSeconds });
@@ -65,12 +65,12 @@ async function revokeSandboxUser(env, runId, { now = Date.now() } = {}) {
     'SELECT user_id, revoked_at FROM mcp_sandbox_users WHERE run_id = ?'
   ).bind(runId.toLowerCase()).first();
   if (!lease) return { revoked: false, reason: 'not_found' };
-  if (lease.revoked_at !== null) return { revoked: false, reason: 'already_revoked' };
+  const alreadyRevoked = lease.revoked_at !== null;
   await env.MCP_IDENTITY_DB.prepare('UPDATE mcp_sandbox_users SET revoked_at = COALESCE(revoked_at, ?) WHERE run_id = ?')
     .bind(now, runId.toLowerCase()).run();
   await setUserStatus(env, lease.user_id, 'disabled');
   await env.ZEROCREDS_WALLET_PROFILES.delete(lease.user_id);
-  return { revoked: true, userId: identity.userId };
+  return alreadyRevoked ? { revoked: false, reason: 'already_revoked' } : { revoked: true, userId: identity.userId };
 }
 
 async function authorizeProvisioning(request, env) {
