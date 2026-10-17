@@ -26,7 +26,7 @@ function walletProviderConfigured(env) {
 }
 
 async function walletProfileFor(env, identity) {
-  if (!walletProviderConfigured(env) || identity?.service !== 'mcp-host' || !identity?.userId) return null;
+  if (!walletProviderConfigured(env) || !['mcp-host', 'mcp-sandbox-agent'].includes(identity?.service) || !identity?.userId) return null;
   let value;
   try { value = await env.ZEROCREDS_WALLET_PROFILES.get(String(identity.userId), { type: 'json' }); }
   catch { return null; }

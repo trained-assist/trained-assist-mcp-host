@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const { createGoogleDocsProvider } = require('./google-docs');
 const { findActiveUser } = require('./identity');
-const { TOOL_NAMES } = require('./zerocreds-wallet');
+const { TOOL_NAMES, walletProfileFor } = require('./zerocreds-wallet');
 
 const HUMAN_SERVICE = 'mcp-host';
 const HUMAN_AUDIENCE = 'trained-assist:mcp:user';
@@ -12,7 +12,7 @@ const AGENT_SERVER = 'mem-gpt';
 const AGENT_BINDING = 'mem-gpt-user-sandbox';
 const AGENT_SCOPE = 'mcp:user-agent-run';
 const AGENT_POLICY = 'mem-gpt-user-run-v1';
-const DEFAULT_USER_CATALOGUE = 'mem-gpt-user-catalogue-v1';
+const DEFAULT_USER_CATALOGUE = 'mem-gpt-user-catalogue-v2';
 const MAX_AGENT_GRANT_SECONDS = 2 * 60 * 60;
 
 function humanToolsForRole(_role, walletAuthorized = false) {
@@ -138,13 +138,17 @@ async function verifyAgentRunScope({ authorization, headers, env, catalogDigest,
       || typeof claims.userTaskId !== 'string' || !claims.userTaskId || typeof claims.profileId !== 'string' || !claims.profileId
       || !Number.isSafeInteger(claims.ownerGeneration) || claims.ownerGeneration < 1
       || !Array.isArray(claims.allowedTools) || !claims.allowedTools.length || new Set(claims.allowedTools).size !== claims.allowedTools.length
-      || claims.allowedTools.some(name => typeof name !== 'string' || !humanToolsForRole('user').includes(name))
       || !Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt) || issuedAt > nowSeconds + 60
       || expiresAt <= nowSeconds || expiresAt <= issuedAt || expiresAt - issuedAt > MAX_AGENT_GRANT_SECONDS
       || headers.get('x-mcp-operation') !== 'invocation' || headers.get('x-mcp-scope') !== AGENT_SCOPE) return null;
 
-  const identity = await findActiveUser(env, claims.userId);
-  if (!identity) return null;
+  let identity = await findActiveUser(env, claims.userId);
+  if (!identity || (identity.sandboxProfileId && identity.sandboxProfileId !== claims.profileId)) return null;
+  if (identity.service === 'mcp-sandbox-agent') {
+    identity = { ...identity, walletProfile: await walletProfileFor(env, identity) };
+    if (!identity.walletProfile) return null;
+  }
+  if (claims.allowedTools.some(name => typeof name !== 'string' || !humanToolsForRole('user', !!identity.walletProfile).includes(name))) return null;
   return {
     profileId: claims.profileId,
     taskId: claims.userTaskId,

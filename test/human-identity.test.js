@@ -7,12 +7,14 @@ const { createHost } = require('../src');
 const identity = require('../src/identity');
 const { createHumanProvider, humanScope, humanToolsForRole, HUMAN_SERVICE } = require('../src/human');
 const { createZeroCredsWalletProvider } = require('../src/zerocreds-wallet');
+const { provisionSandboxUser, revokeSandboxUser } = require('../src/sandbox-provisioning');
 const { AGENT_BINDING, AGENT_ISSUER, AGENT_POLICY, AGENT_SCOPE, AGENT_SERVER, DEFAULT_USER_CATALOGUE, HUMAN_AUDIENCE } = require('../src/human');
 const { createFakeD1, applyMigrations } = require('../test/helpers/fake-d1');
 
 const migrationFiles = [
   'migrations/0001_identity.sql',
   'migrations/0002_identity_canonical.sql',
+  'migrations/0003_sandbox_user_leases.sql',
 ];
 
 async function setup() {
@@ -245,6 +247,103 @@ test('runner-signed run grant exposes only its scoped user tools without a perso
     body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/list' }),
   }), env);
   assert.equal((await disabled.json()).error.code, -32001);
+});
+
+test('sandbox user provisioning is fresh per run, idempotent, leased, and revocable', async () => {
+  const db = createFakeD1();
+  await applyMigrations(db, migrationFiles);
+  const walletProfiles = new Map();
+  const env = { MCP_IDENTITY_DB: db, MCP_SANDBOX_PROVISIONING_ENABLED: 'true', MCP_SANDBOX_WALLET_OWNER_ID: 'sandbox_owner',
+    ZEROCREDS_WALLET_PROFILES: {
+      put: async (key, value, options) => walletProfiles.set(key, { value, options }),
+      get: async key => walletProfiles.get(key)?.value,
+      delete: async key => walletProfiles.delete(key),
+    } };
+  const runA = crypto.randomUUID();
+  const runB = crypto.randomUUID();
+  const expiresAt = Date.now() + 60 * 60_000;
+  const first = await provisionSandboxUser(env, { runId: runA, expiresAt });
+  const retried = await provisionSandboxUser(env, { runId: runA, expiresAt });
+  const second = await provisionSandboxUser(env, { runId: runB, expiresAt });
+  assert.deepEqual({ ...first, created: undefined }, { ...retried, created: undefined });
+  assert.equal(first.created, true);
+  assert.equal(retried.created, false);
+  assert.notEqual(first.userId, second.userId);
+  assert.notEqual(first.profileId, second.profileId);
+  assert.deepEqual(JSON.parse(walletProfiles.get(first.userId).value), { owner_id: 'sandbox_owner', profile_id: first.profileId });
+  assert.equal(walletProfiles.get(first.userId).options.expirationTtl, 3600);
+  assert.equal((await identity.findActiveUser(env, first.userId)).sandboxProfileId, first.profileId);
+  await assert.rejects(provisionSandboxUser(env, { runId: runA, expiresAt: expiresAt + 1000 }), /sandbox_run_identity_conflict/);
+  await revokeSandboxUser(env, runA);
+  assert.equal(await identity.findActiveUser(env, first.userId), null);
+  assert.equal(walletProfiles.has(first.userId), false);
+  assert.ok(await identity.findActiveUser(env, second.userId));
+});
+
+test('sandbox provisioning HTTP endpoints require the dedicated token and never return credential material', async () => {
+  const { default: humanWorker } = await import('../src/worker-human.mjs');
+  const db = createFakeD1();
+  await applyMigrations(db, migrationFiles);
+  const values = new Map();
+  const env = { MCP_IDENTITY_DB: db, MCP_SANDBOX_PROVISIONING_ENABLED: 'true', MCP_SANDBOX_PROVISION_TOKEN: 'sandbox-provision-token-12345678901234567890',
+    MCP_SANDBOX_WALLET_OWNER_ID: 'sandbox_owner', ZEROCREDS_WALLET_PROFILES: {
+      put: async (key, value, options) => values.set(key, { value, options }),
+      delete: async key => values.delete(key),
+      get: async key => values.get(key)?.value,
+    } };
+  const runId = crypto.randomUUID();
+  const request = (path, body, token = env.MCP_SANDBOX_PROVISION_TOKEN) => humanWorker.fetch(new Request(`https://human.example${path}`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  }), env);
+  assert.equal((await request('/internal/sandbox/users', { runId, expiresAt: Date.now() + 60_000 }, 'wrong-token')).status, 401);
+  const created = await request('/internal/sandbox/users', { runId, expiresAt: Date.now() + 60 * 60_000 });
+  assert.equal(created.status, 201);
+  const body = await created.json();
+  assert.match(body.userId, /^sbx-[0-9a-f]{32}$/);
+  assert.match(body.profileId, /^sbx_[0-9a-f]{32}$/);
+  assert.equal(JSON.stringify(body).includes('key'), false);
+  const revoked = await request('/internal/sandbox/users/revoke', { runId });
+  assert.equal(revoked.status, 200);
+  assert.equal(values.has(body.userId), false);
+  const duplicateRevoke = await request('/internal/sandbox/users/revoke', { runId });
+  assert.deepEqual(await duplicateRevoke.json(), { revoked: false, reason: 'already_revoked' });
+});
+
+test('sandbox signed grants expose ZeroCreds tools only for the matching fresh wallet profile', async () => {
+  const { default: humanWorker } = await import('../src/worker-human.mjs');
+  const db = createFakeD1();
+  await applyMigrations(db, migrationFiles);
+  const profiles = new Map();
+  const env = { MCP_IDENTITY_DB: db, MCP_RUNNER_AUTH_TOKEN: 'runner-transport-token-1234567890',
+    MCP_USER_CATALOGUE_VERSION: DEFAULT_USER_CATALOGUE, ZEROCREDS_WALLET_API_URL: 'https://wallet.example',
+    ZEROCREDS_WALLET_ISSUER: 'trained-assist-mcp-host-sandbox', ZEROCREDS_WALLET_KEY_ID: 'wallet-sandbox-20261016',
+    ZEROCREDS_WALLET_SIGNING_KEY: JSON.stringify(crypto.generateKeyPairSync('ed25519').privateKey.export({ format: 'jwk' })),
+    ZEROCREDS_WALLET_PROFILES: { put: async (key, value) => profiles.set(key, value), get: async key => JSON.parse(profiles.get(key)) } };
+  const runId = crypto.randomUUID();
+  const user = await provisionSandboxUser({ ...env, MCP_SANDBOX_PROVISIONING_ENABLED: 'true', MCP_SANDBOX_WALLET_OWNER_ID: 'sandbox_owner' },
+    { runId, expiresAt: Date.now() + 60 * 60_000 });
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  env.MCP_RUNNER_PUBLIC_JWK = JSON.stringify(publicKey.export({ format: 'jwk' }));
+  const host = createHost({ providers: [createHumanProvider(env), createZeroCredsWalletProvider(env)], audience: HUMAN_AUDIENCE });
+  const now = Math.floor(Date.now() / 1000);
+  const allowedTools = ['identity.whoami', 'google_docs.connect', 'google_docs.get_document', ...Object.keys(require('@zerocreds/mcp-provider').API_OPERATIONS)];
+  const claims = { iss: AGENT_ISSUER, aud: HUMAN_AUDIENCE, sub: runId, userId: user.userId, profileId: user.profileId,
+    userTaskId: 'sandbox-task', runId, ownerGeneration: 1, serverId: AGENT_SERVER, bindingRef: AGENT_BINDING,
+    scope: AGENT_SCOPE, policyVersion: AGENT_POLICY, catalogueVersion: DEFAULT_USER_CATALOGUE,
+    catalogueDigest: host.catalog.digest, allowedTools, iat: now, exp: now + 300 };
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const unsigned = `${encode({ alg: 'EdDSA', typ: 'JWT' })}.${encode(claims)}`;
+  const proof = `${unsigned}.${crypto.sign(null, Buffer.from(unsigned), privateKey).toString('base64url')}`;
+  const headers = { authorization: `Bearer ${env.MCP_RUNNER_AUTH_TOKEN}`, 'x-mcp-run-binding': proof,
+    'x-mcp-operation': 'invocation', 'x-mcp-scope': AGENT_SCOPE, 'x-mcp-user-task-id': claims.userTaskId,
+    'x-mcp-profile': user.profileId, 'x-mcp-run-id': runId, 'content-type': 'application/json' };
+  const listed = await humanWorker.fetch(new Request('https://human.example/mcp', { method: 'POST', headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) }), env);
+  const result = await listed.json();
+  assert.deepEqual(result.result.tools.map(tool => tool.name).sort(), allowedTools.sort());
+  const wrongProfile = await humanWorker.fetch(new Request('https://human.example/mcp', { method: 'POST',
+    headers: { ...headers, 'x-mcp-profile': 'sbx_other_profile' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) }), env);
+  assert.equal((await wrongProfile.json()).error.code, -32001);
 });
 
 test('machine fixture worker catalog digest is unchanged by the human worker', async () => {
