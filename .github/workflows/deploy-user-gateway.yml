@@ -7,10 +7,6 @@ on:
         description: Validate the Worker bundle without deploying
         type: boolean
         default: true
-      zerocreds_wallet:
-        description: Enable the ZeroCreds sandbox provider using the trusted sandbox key/profile mapping
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -51,63 +47,6 @@ jobs:
       - name: Configure identity schema migrations
         if: ${{ inputs.dry_run == false }}
         run: npx --yes wrangler@4.146.0 d1 migrations apply "$DATABASE_NAME" --remote --config wrangler.user.jsonc
-      - name: Configure the explicit ZeroCreds sandbox profile
-        if: ${{ inputs.zerocreds_wallet }}
-        env:
-          ZEROCREDS_WALLET_SIGNING_KEY: ${{ secrets.ZEROCREDS_WALLET_SIGNING_KEY }}
-          ZEROCREDS_WALLET_PROFILES_JSON: ${{ secrets.ZEROCREDS_WALLET_PROFILES_JSON }}
-          ZEROCREDS_WALLET_ASSERTION_ISSUERS_JSON: ${{ secrets.ZEROCREDS_WALLET_ASSERTION_ISSUERS_JSON }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          DATABASE_NAME: trained-assist-mcp-identity
-          ZEROCREDS_USER_KV_NAMESPACE: 5a1a410cf57d4f498d9f87a866c2441e
-        run: |
-          test -n "$ZEROCREDS_WALLET_SIGNING_KEY"
-          test -n "$ZEROCREDS_WALLET_PROFILES_JSON"
-          node <<'NODE'
-          const crypto = require('node:crypto');
-          const fs = require('node:fs');
-          const jwk = JSON.parse(process.env.ZEROCREDS_WALLET_SIGNING_KEY);
-          if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || !jwk.d || !jwk.x) process.exit(1);
-          const profiles = JSON.parse(process.env.ZEROCREDS_WALLET_PROFILES_JSON);
-          if (Object.keys(profiles).length !== 1) process.exit(1);
-          for (const [userId, profile] of Object.entries(profiles)) {
-            if (!/^[A-Za-z0-9_-]{1,100}$/.test(userId) || !/^[A-Za-z0-9_-]{1,100}$/.test(profile.owner_id || '')
-                || !/^[A-Za-z0-9_-]{1,100}$/.test(profile.profile_id || '')
-                || profile.destination !== 'wallet_sandbox') process.exit(1);
-          }
-          const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
-          const pem = publicKey.export({ type: 'spki', format: 'pem' });
-          const trusted = JSON.parse(process.env.ZEROCREDS_WALLET_ASSERTION_ISSUERS_JSON);
-          const record = trusted['trained-assist-mcp-host-sandbox'];
-          const profile = Object.values(profiles)[0];
-          if (!record || Object.keys(record.keys || {}).join(',') !== 'wallet-sandbox-20261017'
-              || record.keys['wallet-sandbox-20261017'] !== pem
-              || Object.keys(record.profiles || {}).length !== 1
-              || record.profiles[profile.profile_id]?.owner_id !== profile.owner_id
-              || record.profiles[profile.profile_id]?.destination !== 'wallet_sandbox'
-              || JSON.stringify(record.profiles[profile.profile_id]?.callers) !== JSON.stringify(['human'])) process.exit(1);
-          fs.writeFileSync(process.env.RUNNER_TEMP + '/wallet-profiles.json', JSON.stringify(profiles), { mode: 0o600, flag: 'wx' });
-          const keyFile = process.env.RUNNER_TEMP + '/wallet-signing-key.json';
-          fs.writeFileSync(keyFile, JSON.stringify(jwk), { mode: 0o600, flag: 'wx' });
-          const privateKey = crypto.createPrivateKey({ key: jwk, format: 'jwk' });
-          fs.writeFileSync(process.env.RUNNER_TEMP + '/wallet-public-key.pem', crypto.createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }), { mode: 0o600, flag: 'wx' });
-          NODE
-          if [ "${{ inputs.dry_run }}" = "false" ]; then
-            npx --yes wrangler@4.146.0 d1 execute "$DATABASE_NAME" --remote --config wrangler.user.jsonc --command "INSERT INTO identity_users (user_id,email,role,service,status,created_at,updated_at) VALUES ('zerocreds-sandbox-agent','zerocreds-sandbox-agent@localhost','user','mcp-host','active',CAST(strftime('%s','now') AS INTEGER)*1000,CAST(strftime('%s','now') AS INTEGER)*1000) ON CONFLICT(user_id) DO NOTHING"
-            npx --yes wrangler@4.146.0 kv key put zerocreds-sandbox-agent --path "$RUNNER_TEMP/wallet-profiles.json" --namespace-id "$ZEROCREDS_USER_KV_NAMESPACE" --remote
-          fi
-      - name: Enable ZeroCreds provider variables
-        if: ${{ inputs.zerocreds_wallet }}
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const config = JSON.parse(fs.readFileSync('wrangler.user.jsonc', 'utf8'));
-          config.vars.ZEROCREDS_WALLET_API_URL = 'https://zerocreds-wallet-api-sandbox.skillset-apply.workers.dev';
-          config.vars.ZEROCREDS_WALLET_ISSUER = 'trained-assist-mcp-host-sandbox';
-          config.vars.ZEROCREDS_WALLET_KEY_ID = 'wallet-sandbox-20261017';
-          config.vars.MCP_USER_CATALOGUE_VERSION = 'mem-gpt-user-catalogue-v1-zerocreds';
-          fs.writeFileSync('wrangler.user.jsonc', JSON.stringify(config, null, 2));
-          NODE
       - name: Configure optional sandbox Runner delegation
         run: |
           if [ -n "$MCP_RUNNER_AUTH_TOKEN" ] && [ -z "$MCP_RUNNER_PUBLIC_JWK" ] || [ -z "$MCP_RUNNER_AUTH_TOKEN" ] && [ -n "$MCP_RUNNER_PUBLIC_JWK" ]; then
@@ -124,16 +63,6 @@ jobs:
       - name: Deploy sandbox Worker
         if: ${{ inputs.dry_run == false }}
         run: npx --yes wrangler@4.146.0 deploy --config wrangler.user.jsonc
-      - name: Configure ZeroCreds signing key and one-user profile mapping
-        if: ${{ inputs.dry_run == false && inputs.zerocreds_wallet }}
-        run: |
-          SIGNING_KEY=$(cat "$RUNNER_TEMP/wallet-signing-key.json")
-          printf '%s' "$SIGNING_KEY" | npx --yes wrangler@4.146.0 secret put ZEROCREDS_WALLET_SIGNING_KEY --config wrangler.user.jsonc
-          PROFILE_USER_ID=$(node -e "const p=require(process.env.RUNNER_TEMP+'/wallet-profiles.json');process.stdout.write(Object.keys(p)[0])")
-          npx --yes wrangler@4.146.0 kv key put "$PROFILE_USER_ID" --path "$RUNNER_TEMP/wallet-profiles.json" --binding ZEROCREDS_WALLET_PROFILES --config wrangler.user.jsonc
-      - name: Pin the ZeroCreds user catalog version
-        if: ${{ inputs.dry_run == false && inputs.zerocreds_wallet }}
-        run: npx --yes wrangler@4.146.0 secret put MCP_USER_CATALOGUE_VERSION --config wrangler.user.jsonc <<< 'mem-gpt-user-catalogue-v1-zerocreds'
       - name: Set sandbox Runner transport secret
         if: ${{ inputs.dry_run == false && env.MCP_RUNNER_AUTH_TOKEN != '' }}
         run: printf '%s' "$MCP_RUNNER_AUTH_TOKEN" | npx --yes wrangler@4.146.0 secret put MCP_RUNNER_AUTH_TOKEN --config wrangler.user.jsonc
