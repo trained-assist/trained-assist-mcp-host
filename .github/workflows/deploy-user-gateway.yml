@@ -25,6 +25,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       MCP_RUNNER_AUTH_TOKEN: ${{ secrets.MCP_USER_AUTH_TOKEN }}
       MCP_RUNNER_PUBLIC_JWK: ${{ vars.MCP_USER_RUNNER_PUBLIC_JWK }}
+      MCP_SANDBOX_PROVISION_TOKEN: ${{ secrets.MCP_SANDBOX_PROVISION_TOKEN }}
+      MCP_SANDBOX_WALLET_OWNER_ID: ${{ vars.MCP_SANDBOX_WALLET_OWNER_ID }}
       DATABASE_NAME: trained-assist-mcp-identity
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +55,14 @@ jobs:
             echo 'sandbox_runner_mcp_pair_incomplete' >&2
             exit 1
           fi
+      - name: Configure disposable sandbox identity provisioning
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          if [ -n "$MCP_SANDBOX_PROVISION_TOKEN" ] || [ -n "$MCP_SANDBOX_WALLET_OWNER_ID" ]; then
+            test "${#MCP_SANDBOX_PROVISION_TOKEN}" -ge 32
+            test "$MCP_SANDBOX_WALLET_OWNER_ID" = "sandbox_owner"
+            node -e "const fs=require('fs');const p='wrangler.user.jsonc';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.vars.MCP_SANDBOX_PROVISIONING_ENABLED='true';c.vars.MCP_SANDBOX_WALLET_OWNER_ID=process.env.MCP_SANDBOX_WALLET_OWNER_ID;fs.writeFileSync(p,JSON.stringify(c,null,2))"
+          fi
           if [ -n "$MCP_RUNNER_AUTH_TOKEN" ]; then
             test "${#MCP_RUNNER_AUTH_TOKEN}" -ge 32
             node -e "const fs=require('fs');const p='wrangler.user.jsonc';const c=JSON.parse(fs.readFileSync(p,'utf8'));const j=JSON.parse(process.env.MCP_RUNNER_PUBLIC_JWK);if(j.kty!=='OKP'||j.crv!=='Ed25519'||typeof j.x!=='string'||j.d!==undefined)process.exit(1);c.vars.MCP_RUNNER_PUBLIC_JWK=JSON.stringify(j);fs.writeFileSync(p,JSON.stringify(c,null,2))"
@@ -66,3 +76,6 @@ jobs:
       - name: Set sandbox Runner transport secret
         if: ${{ inputs.dry_run == false && env.MCP_RUNNER_AUTH_TOKEN != '' }}
         run: printf '%s' "$MCP_RUNNER_AUTH_TOKEN" | npx --yes wrangler@4.146.0 secret put MCP_RUNNER_AUTH_TOKEN --config wrangler.user.jsonc
+      - name: Set sandbox provisioning secret
+        if: ${{ inputs.dry_run == false && env.MCP_SANDBOX_PROVISION_TOKEN != '' }}
+        run: printf '%s' "$MCP_SANDBOX_PROVISION_TOKEN" | npx --yes wrangler@4.146.0 secret put MCP_SANDBOX_PROVISION_TOKEN --config wrangler.user.jsonc

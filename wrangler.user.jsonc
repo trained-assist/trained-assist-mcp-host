@@ -30,7 +30,7 @@
     }
   ],
   "vars": {
-    "MCP_USER_CATALOGUE_VERSION": "mem-gpt-user-catalogue-v1",
+    "MCP_USER_CATALOGUE_VERSION": "mem-gpt-user-catalogue-v2",
     "ZEROCREDS_WALLET_API_URL": "https://zerocreds-wallet-api-sandbox.skillset-apply.workers.dev",
     "ZEROCREDS_WALLET_ISSUER": "trained-assist-mcp-host-sandbox",
     "ZEROCREDS_WALLET_KEY_ID": "wallet-sandbox-20261016"

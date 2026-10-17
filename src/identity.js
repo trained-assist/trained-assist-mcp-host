@@ -37,8 +37,17 @@ async function findActiveUser(env, userId) {
   const row = await env.MCP_IDENTITY_DB.prepare(
     `SELECT user_id, role, status, service, email FROM identity_users WHERE user_id = ?`
   ).bind(userId).first();
-  if (!row || row.status !== 'active' || !['mcp-host', 'ladder'].includes(row.service)) return null;
-  return { userId: row.user_id, role: row.role, service: row.service, email: row.email, keyHash: null };
+  if (!row || row.status !== 'active' || !['mcp-host', 'ladder', 'mcp-sandbox-agent'].includes(row.service)) return null;
+  let sandboxProfileId;
+  if (row.service === 'mcp-sandbox-agent') {
+    const lease = await env.MCP_IDENTITY_DB.prepare(
+      `SELECT profile_id, expires_at, revoked_at FROM mcp_sandbox_users WHERE user_id = ?`
+    ).bind(userId).first();
+    if (!lease || lease.revoked_at !== null || lease.expires_at <= Date.now()) return null;
+    sandboxProfileId = lease.profile_id;
+  }
+  return { userId: row.user_id, role: row.role, service: row.service, email: row.email, keyHash: null,
+    ...(sandboxProfileId ? { sandboxProfileId } : {}) };
 }
 
 async function createUser(env, { userId, email, role = 'user', service = DEFAULT_SERVICE, status = 'active' }) {
