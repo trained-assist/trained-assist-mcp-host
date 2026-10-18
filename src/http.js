@@ -23,7 +23,12 @@ function send(res, status, value) {
 function createHttpHandler({ protocol }) {
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
-    if (req.method !== 'POST' || url.pathname !== '/mcp') return send(res, 404, { error: 'not found' });
+    if (url.pathname !== '/mcp') return send(res, 404, { error: 'not found' });
+    if (req.method === 'GET') {
+      res.writeHead(405, { 'allow': 'POST', 'content-type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: 'method not allowed' }));
+    }
+    if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
     let message;
     try { message = await readJson(req); }
     catch (err) { return send(res, err.statusCode || 400, { error: err.message }); }

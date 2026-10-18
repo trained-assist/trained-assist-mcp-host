@@ -5,8 +5,14 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 function createFetchHandler({ protocol, maxBodyBytes = MAX_BODY_BYTES }) {
   return async function fetchHandler(request) {
     const url = new URL(request.url);
-    if (request.method !== 'POST' || url.pathname !== '/mcp') {
+    if (url.pathname !== '/mcp') {
       return Response.json({ error: 'not found' }, { status: 404 });
+    }
+    if (request.method === 'GET') {
+      return new Response(null, { status: 405, headers: { Allow: 'POST' } });
+    }
+    if (request.method !== 'POST') {
+      return Response.json({ error: 'method not allowed' }, { status: 405, headers: { Allow: 'POST' } });
     }
     const contentLength = Number(request.headers.get('content-length') || 0);
     if (contentLength > maxBodyBytes) return Response.json({ error: 'body too large' }, { status: 413 });

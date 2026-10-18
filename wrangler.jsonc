@@ -8,6 +8,8 @@
   "observability": { "enabled": true },
   "vars": {
     "MCP_TEST_PRINCIPAL_ID": "integration-telegram-ux-v1",
-    "MCP_TEST_CATALOGUE_VERSION": "registry-fixture-catalogue-v1"
+    "MCP_TEST_CATALOGUE_VERSION": "registry-fixture-catalogue-v1",
+    "MCP_TEST_EXPIRES_AT": "2026-11-15T23:59:59Z",
+    "MCP_TEST_RUNNER_PUBLIC_JWK": "{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"x\":\"743I4KD0tU1dhgpfz0Nn1zDz2pFvX9gCZW_Kh5OFq5M\"}"
   }
 }
