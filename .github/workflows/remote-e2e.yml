@@ -1,6 +1,11 @@
 name: Remote test Worker E2E
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/remote-e2e.yml
+      - scripts/remote-e2e.mjs
   workflow_dispatch:
 
 permissions:
@@ -12,7 +17,9 @@ concurrency:
 
 jobs:
   remote-e2e:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: sandbox
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
