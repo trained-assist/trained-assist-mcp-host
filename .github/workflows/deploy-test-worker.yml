@@ -49,7 +49,7 @@ jobs:
           if (runnerJwk?.kty !== 'OKP' || runnerJwk?.crv !== 'Ed25519' || !runnerJwk.x || runnerJwk.d) throw new Error('Runner verification key is invalid');
           const publicJwk = createPublicKey(createPrivateKey({ key: privateJwk, format: 'jwk' })).export({ format: 'jwk' });
           if (!publicJwk.x || publicJwk.x === runnerJwk.x) throw new Error('E2E signing key must be distinct from the Runner key');
-          appendFileSync(process.env.GITHUB_OUTPUT, 'public_jwk=' + JSON.stringify({ kty: 'OKP', crv: 'Ed25519', x: publicJwk.x }) + '\\n');
+          appendFileSync(process.env.GITHUB_OUTPUT, 'public_jwk=' + JSON.stringify({ kty: 'OKP', crv: 'Ed25519', x: publicJwk.x }) + '\n');
           NODE
       - name: Deploy fixture Worker and credentials
         env:
@@ -63,6 +63,6 @@ jobs:
           printf '%s\n' "$MCP_TEST_AUTH_TOKEN" | npx --yes wrangler@4.146.0 secret put MCP_TEST_AUTH_TOKEN --config wrangler.jsonc
           npx --yes wrangler@4.146.0 deploy --config wrangler.jsonc \
             --var "MCP_TEST_EXPIRES_AT:$MCP_TEST_EXPIRES_AT" \
-            --var "MCP_TEST_RUNNER_PUBLIC_JWK:$MCP_TEST_RUNNER_PUBLIC_JWK" \\
-            --var "MCP_TEST_E2E_ENABLED:true" \\
+            --var "MCP_TEST_RUNNER_PUBLIC_JWK:$MCP_TEST_RUNNER_PUBLIC_JWK" \
+            --var "MCP_TEST_E2E_ENABLED:true" \
             --var "MCP_TEST_E2E_PUBLIC_JWK:$MCP_TEST_E2E_PUBLIC_JWK"
