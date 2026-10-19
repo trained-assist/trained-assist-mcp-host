@@ -1,6 +1,10 @@
 name: Deploy Registry MCP test Worker
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-test-worker.yml
   workflow_dispatch:
 
 permissions:
@@ -20,6 +24,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       MCP_TEST_AUTH_TOKEN: ${{ secrets.MCP_TEST_AUTH_TOKEN }}
       MCP_TEST_RUNNER_PUBLIC_JWK: ${{ secrets.MCP_TEST_RUNNER_PUBLIC_JWK }}
+      MCP_TEST_E2E_PRIVATE_JWK: ${{ secrets.MCP_TEST_E2E_PRIVATE_JWK }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,14 +37,32 @@ jobs:
       - name: Create a bounded test lease
         id: lease
         run: echo "expires_at=$(date -u -d '+30 days' '+%Y-%m-%dT23:59:59Z')" >> "$GITHUB_OUTPUT"
+      - name: Derive isolated test E2E public key
+        id: e2e-key
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { createPrivateKey, createPublicKey } from 'node:crypto';
+          const privateJwk = JSON.parse(process.env.MCP_TEST_E2E_PRIVATE_JWK || 'null');
+          const runnerJwk = JSON.parse(process.env.MCP_TEST_RUNNER_PUBLIC_JWK || 'null');
+          if (privateJwk?.kty !== 'OKP' || privateJwk?.crv !== 'Ed25519' || !privateJwk.d || !privateJwk.x) throw new Error('sandbox E2E signing key is invalid');
+          if (runnerJwk?.kty !== 'OKP' || runnerJwk?.crv !== 'Ed25519' || !runnerJwk.x || runnerJwk.d) throw new Error('Runner verification key is invalid');
+          const publicJwk = createPublicKey(createPrivateKey({ key: privateJwk, format: 'jwk' })).export({ format: 'jwk' });
+          if (!publicJwk.x || publicJwk.x === runnerJwk.x) throw new Error('E2E signing key must be distinct from the Runner key');
+          appendFileSync(process.env.GITHUB_OUTPUT, 'public_jwk=' + JSON.stringify({ kty: 'OKP', crv: 'Ed25519', x: publicJwk.x }) + '\\n');
+          NODE
       - name: Deploy fixture Worker and credentials
         env:
           MCP_TEST_EXPIRES_AT: ${{ steps.lease.outputs.expires_at }}
+          MCP_TEST_E2E_PUBLIC_JWK: ${{ steps.e2e-key.outputs.public_jwk }}
         run: |
           test -n "$MCP_TEST_AUTH_TOKEN"
           test -n "$MCP_TEST_RUNNER_PUBLIC_JWK"
+          test -n "$MCP_TEST_E2E_PUBLIC_JWK"
           node -e 'const k=JSON.parse(process.env.MCP_TEST_RUNNER_PUBLIC_JWK); if(k.kty!=="OKP"||k.crv!=="Ed25519"||!k.x||k.d)process.exit(1)'
           printf '%s\n' "$MCP_TEST_AUTH_TOKEN" | npx --yes wrangler@4.146.0 secret put MCP_TEST_AUTH_TOKEN --config wrangler.jsonc
           npx --yes wrangler@4.146.0 deploy --config wrangler.jsonc \
             --var "MCP_TEST_EXPIRES_AT:$MCP_TEST_EXPIRES_AT" \
-            --var "MCP_TEST_RUNNER_PUBLIC_JWK:$MCP_TEST_RUNNER_PUBLIC_JWK"
+            --var "MCP_TEST_RUNNER_PUBLIC_JWK:$MCP_TEST_RUNNER_PUBLIC_JWK" \\
+            --var "MCP_TEST_E2E_ENABLED:true" \\
+            --var "MCP_TEST_E2E_PUBLIC_JWK:$MCP_TEST_E2E_PUBLIC_JWK"
