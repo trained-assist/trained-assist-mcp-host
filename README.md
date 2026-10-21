@@ -116,6 +116,30 @@ Trusted environment/configuration:
 
 Exposed tools: `search_serp_free` and `search_serper`. They are read-only; their outbound origin, redirect handling, request budget and response size are bounded by the pinned adapter.
 
+## JS/TS code provider (local stdio and Worker)
+
+`src/js-ts-code.js` exposes one MCP tool, `write`, that turns a natural-language task into JavaScript or TypeScript source with the Ladder service, validates the syntax, and can write the result to a file. It is mounted locally through `scripts/js-ts-code-stdio.js`:
+
+```json
+"js-ts-code": {
+  "type": "local",
+  "command": ["node", "/path/to/trained-assist-mcp-host/scripts/js-ts-code-stdio.js"],
+  "environment": { "LADDER_API_KEY": "{file:/Users/vova/.config/opencode/secrets/ladder-api-key}" },
+  "timeout": { "catalog": 180000, "execution": 180000 }
+}
+```
+
+Trusted configuration (never passed through MCP arguments):
+- `LADDER_API_KEY`, or `LADDER_API_KEY_FILE` (default `~/.config/opencode/secrets/ladder-api-key`) - Ladder service key. The provider fails with an explicit message when it is missing; no key is stored in this repository.
+- `LADDER_BASE_URL` (default `https://llm-ladder.trainedassist.store/v1`), `LADDER_MODEL` (default `service`).
+- `JS_TS_CODE_WRITE_ROOT` (default: the server's working directory) - the only tree `writePath` may write into; a path outside it is refused.
+
+Tool inputs: `task`, `code`, `existingCode`, `existingPath`, `iterations`, `language` (`javascript`|`typescript`), `module` (`cjs`|`esm`|`auto`), `typeCheck`, `maxTokens`, `model`, `autoChunk`, `noComments`, `writePath`, `context`. `module` pins the module format of the generated code; when the model returns the other format the provider converts it once and reports the outcome in `moduleFormat`. The result is `{ code, language, moduleFormat, valid, error, note, iterations, warnings, writtenTo?, usage }`.
+
+`valid` is `null` when the runtime cannot verify the syntax (the Worker forbids dynamic code evaluation and has no filesystem); that is not a failure of the generated code. Runtime differences are explicit rather than silent: the Node stdio server validates script and module syntax, validates TypeScript when the optional `typescript` devDependency is installed, and can write files; the Worker validates nothing, writes nothing, and says so in `note` and `warnings`.
+
+The OpenCode Code Mode sandbox is an orchestration language: it cannot `require()` modules, cannot `import()`, and cannot touch the filesystem. Generated code therefore has to land with `writePath` (or the agent's file-write tool) and be run with the shell tool. Running it inside `execute` fails with `Unknown identifier 'require'` or `Syntax 'ImportExpression' is not supported`.
+
 ## CI / provisioning
 
 - `CI` runs on every pull request: `npm run check`, `npm test`, dependency-boundary check and package dry run.

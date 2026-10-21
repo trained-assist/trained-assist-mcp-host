@@ -1,5 +1,6 @@
 import machineWorker from './worker.mjs';
 import humanWorker from './worker-human.mjs';
+import codeWorker from './worker-js-ts-code.mjs';
 import identityModule from './identity.js';
 import humanModule from './human.js';
 
@@ -23,6 +24,9 @@ export { resolveMode, verifyKey };
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/js-ts-code') {
+      return codeWorker.fetch(request, env);
+    }
     if (url.pathname !== MCP_PATH) return new Response('not found', { status: 404 });
     const mode = await resolveMode(request, env);
     return mode === 'human' ? humanWorker.fetch(request, env) : machineWorker.fetch(request, env);
