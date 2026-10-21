@@ -8,7 +8,9 @@
 //
 // Checks: initialize; unauthenticated tools/list denied; product catalog
 // tools/list per key; whoami identity; synthetic fixture tools stay hidden
-// from every role; unknown key denied. Keys are never printed.
+// from every role; unknown key denied. The ZeroCreds wallet tools are part of
+// the allowed set because a wallet profile can be mapped for a user, so they
+// are accepted when present and are never required. Keys are never printed.
 
 const gateway = process.env.IDENTITY_GATEWAY || 'https://trained-assist-mcp-host-identity.skillset-apply.workers.dev/mcp';
 const recruiterKey = process.env.RECRUITER_KEY || '';
@@ -43,14 +45,23 @@ if (!recruiterKey || !salesKey) {
 }
 
 const productCatalog = ['google_docs.connect', 'google_docs.get_document', 'identity.whoami'];
+const walletTools = ['zerocreds_wallet_form_create', 'zerocreds_wallet_form_status',
+  'zerocreds_wallet_connection_status', 'zerocreds_wallet_connection_revoke'];
+const allowedTools = [...productCatalog, ...walletTools];
+
+function catalogOk(names) {
+  const sorted = [...names].sort();
+  return productCatalog.every((name) => sorted.includes(name))
+    && sorted.every((name) => allowedTools.includes(name));
+}
 
 const recruiterList = await rpc({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, recruiterKey);
 const recruiterNames = (recruiterList.payload?.result?.tools || []).map((t) => t.name);
-check('recruiter tools/list', JSON.stringify([...recruiterNames].sort()) === JSON.stringify(productCatalog), JSON.stringify(recruiterNames));
+check('recruiter tools/list', catalogOk(recruiterNames), JSON.stringify(recruiterNames));
 
 const salesList = await rpc({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} }, salesKey);
 const salesNames = (salesList.payload?.result?.tools || []).map((t) => t.name);
-check('sales tools/list', JSON.stringify([...salesNames].sort()) === JSON.stringify(productCatalog), JSON.stringify(salesNames));
+check('sales tools/list', catalogOk(salesNames), JSON.stringify(salesNames));
 
 const whoami = await rpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'identity.whoami', arguments: {} } }, recruiterKey);
 let whoamiParsed = null;
