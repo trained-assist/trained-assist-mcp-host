@@ -159,3 +159,29 @@ test('no provider source file embeds a credential', () => {
   const stdio = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'js-ts-code-stdio.js'), 'utf8');
   assert.doesNotMatch(stdio, /[a-f0-9]{64}/, 'scripts/js-ts-code-stdio.js must not contain a hardcoded key');
 });
+
+test('the Worker route stays unavailable until it is explicitly enabled', async () => {
+  const worker = await import('../src/worker-js-ts-code.mjs');
+  const disabled = { MCP_JS_TS_CODE_ENABLED: 'false' };
+  const res = await worker.default.fetch(new Request('https://example.test/js-ts-code'), disabled);
+  assert.equal(res.status, 404);
+
+  const enabledWithoutToken = { MCP_JS_TS_CODE_ENABLED: 'true' };
+  const res2 = await worker.default.fetch(new Request('https://example.test/js-ts-code'), enabledWithoutToken);
+  assert.equal(res2.status, 404);
+});
+
+test('the Worker route rejects a missing or wrong bearer token', async () => {
+  const worker = await import('../src/worker-js-ts-code.mjs');
+  const env = { MCP_JS_TS_CODE_ENABLED: 'true', MCP_JS_TS_CODE_TOKEN: 's3cret-token' };
+  const anonymous = await worker.default.fetch(new Request('https://example.test/js-ts-code'), env);
+  assert.equal(anonymous.status, 401);
+  const wrong = await worker.default.fetch(
+    new Request('https://example.test/js-ts-code', { headers: { authorization: 'Bearer nope' } }),
+    env,
+  );
+  assert.equal(wrong.status, 401);
+  assert.equal(worker.tokenMatches('Bearer s3cret-token', env), true);
+  assert.equal(worker.tokenMatches('Bearer s3cret-toke', env), false);
+  assert.equal(worker.tokenMatches('Bearer s3cret-tokenX', env), false);
+});

@@ -140,6 +140,8 @@ Tool inputs: `task`, `code`, `existingCode`, `existingPath`, `iterations`, `lang
 
 The OpenCode Code Mode sandbox is an orchestration language: it cannot `require()` modules, cannot `import()`, and cannot touch the filesystem. Generated code therefore has to land with `writePath` (or the agent's file-write tool) and be run with the shell tool. Running it inside `execute` fails with `Unknown identifier 'require'` or `Syntax 'ImportExpression' is not supported`.
 
+The Worker route `/js-ts-code` in `src/worker-unified.mjs` is a billable LLM endpoint, so it is unavailable by default. It needs `MCP_JS_TS_CODE_ENABLED=true`, a dedicated `MCP_JS_TS_CODE_TOKEN` secret presented as `Authorization: Bearer <token>`, and a `LADDER_API_KEY` secret for the Ladder service. Without the flag and the token the route answers `404`, and a missing or wrong token answers `401`. It never becomes an open proxy to the Ladder key.
+
 ## CI / provisioning
 
 - `CI` runs on every pull request: `npm run check`, `npm test`, dependency-boundary check and package dry run.

@@ -22,20 +22,23 @@ function hostFor(env) {
     providers: [provider],
     audience,
     timeoutMs: 170000,
-    authenticate: async () => ({
-      profileId,
-      taskId,
-      generation: 1,
-      principalId: 'anonymous',
-      bindingRef,
-      policyVersion: 'js-ts-code-v1',
-      registryDigest: catalog.digest,
-      identity: {},
-      allowedTools: ['write'],
-      audience,
-      operationId: 'user',
-      expiresAt: Date.now() + 60 * 60 * 1000,
-    }),
+    authenticate: async ({ authorization }) => {
+      if (!tokenMatches(authorization, env)) return null;
+      return {
+        profileId,
+        taskId,
+        generation: 1,
+        principalId: 'anonymous',
+        bindingRef,
+        policyVersion: 'js-ts-code-v1',
+        registryDigest: catalog.digest,
+        identity: {},
+        allowedTools: ['write'],
+        audience,
+        operationId: 'user',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+      };
+    },
     authorize: async () => true,
     resolveBindings: async () => ({}),
   });
@@ -43,10 +46,40 @@ function hostFor(env) {
   return host;
 }
 
+function configured(env) {
+  return env.MCP_JS_TS_CODE_ENABLED === 'true'
+    && typeof env.MCP_JS_TS_CODE_TOKEN === 'string'
+    && env.MCP_JS_TS_CODE_TOKEN.trim() !== '';
+}
+
+// Length-independent, content constant-time comparison of the bearer token.
+function tokenMatches(authorization, env) {
+  if (!configured(env)) return false;
+  const match = /^Bearer ([^\s]+)$/.exec(String(authorization || ''));
+  if (!match) return false;
+  const provided = match[1];
+  const expected = env.MCP_JS_TS_CODE_TOKEN;
+  if (provided.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
+
+export { configured, tokenMatches };
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/js-ts-code') return hostFor(env).fetchHandler(request);
+    if (url.pathname === '/js-ts-code') {
+      // The route stays unavailable until it is explicitly enabled with a
+      // dedicated bearer token; it is a billable LLM endpoint and must never
+      // be an open proxy.
+      if (!configured(env)) return new Response('not found', { status: 404 });
+      if (!tokenMatches(request.headers.get('authorization'), env)) {
+        return Response.json({ error: { code: 'UNAUTHORIZED' } }, { status: 401, headers: { 'cache-control': 'no-store' } });
+      }
+      return hostFor(env).fetchHandler(request);
+    }
     return new Response('not found', { status: 404 });
   },
 };
