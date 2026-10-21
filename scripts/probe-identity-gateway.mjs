@@ -6,10 +6,9 @@
 //     RECRUITER_KEY=mcp_i05c_... SALES_KEY=mcp_i05c_... \
 //     node scripts/probe-identity-gateway.mjs
 //
-// Checks: initialize; unauthenticated tools/list denied; role-filtered
-// tools/list per key; whoami identity; recruiter fixture_read with nonce
-// trace; cross-role direct call denied; unknown key denied. Keys are never
-// printed.
+// Checks: initialize; unauthenticated tools/list denied; product catalog
+// tools/list per key; whoami identity; synthetic fixture tools stay hidden
+// from every role; unknown key denied. Keys are never printed.
 
 const gateway = process.env.IDENTITY_GATEWAY || 'https://trained-assist-mcp-host-identity.skillset-apply.workers.dev/mcp';
 const recruiterKey = process.env.RECRUITER_KEY || '';
@@ -43,13 +42,15 @@ if (!recruiterKey || !salesKey) {
   process.exit(failures === 0 ? 0 : 1);
 }
 
+const productCatalog = ['google_docs.connect', 'google_docs.get_document', 'identity.whoami'];
+
 const recruiterList = await rpc({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, recruiterKey);
 const recruiterNames = (recruiterList.payload?.result?.tools || []).map((t) => t.name);
-check('recruiter tools/list', JSON.stringify([...recruiterNames].sort()) === JSON.stringify(['identity.whoami', 'recruiter.fixture_read']), JSON.stringify(recruiterNames));
+check('recruiter tools/list', JSON.stringify([...recruiterNames].sort()) === JSON.stringify(productCatalog), JSON.stringify(recruiterNames));
 
 const salesList = await rpc({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} }, salesKey);
 const salesNames = (salesList.payload?.result?.tools || []).map((t) => t.name);
-check('sales tools/list', JSON.stringify([...salesNames].sort()) === JSON.stringify(['identity.whoami']), JSON.stringify(salesNames));
+check('sales tools/list', JSON.stringify([...salesNames].sort()) === JSON.stringify(productCatalog), JSON.stringify(salesNames));
 
 const whoami = await rpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'identity.whoami', arguments: {} } }, recruiterKey);
 let whoamiParsed = null;
@@ -58,13 +59,13 @@ check('recruiter whoami', whoamiParsed?.role === 'recruiter' && typeof whoamiPar
 
 const nonce = `i05c-probe-${Date.now()}`;
 const fixture = await rpc({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'recruiter.fixture_read', arguments: { nonce } } }, recruiterKey);
-let fixtureParsed = null;
-try { fixtureParsed = JSON.parse(fixture.payload?.result?.content?.[0]?.text || 'null'); } catch {}
-check('recruiter fixture_read nonce trace', fixtureParsed?.marker === 'recruiter-fixture-marker-v1' && fixtureParsed?.trace?.nonce === nonce && fixtureParsed?.trace?.userId === whoamiParsed?.trace?.userId, `nonce=${fixtureParsed?.trace?.nonce} traceId=${fixtureParsed?.trace?.traceId}`);
+const fixtureText = String(fixture.payload?.result?.content?.[0]?.text || '');
+const fixtureDenied = fixture.payload?.result?.isError === true || fixture.payload?.error !== undefined;
+check('synthetic fixture tool hidden from recruiter', fixtureDenied && !fixtureText.includes('recruiter-fixture-marker'), `isError=${fixture.payload?.result?.isError} text=${fixtureText.slice(0, 80)}`);
 
 const crossRole = await rpc({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'recruiter.fixture_read', arguments: { nonce } } }, salesKey);
 const crossRoleDenied = crossRole.payload?.result?.isError === true || crossRole.payload?.error !== undefined;
-check('cross-role direct call denied', crossRoleDenied && !String(crossRole.payload?.result?.content?.[0]?.text || '').includes('recruiter-fixture-marker'), `isError=${crossRole.payload?.result?.isError} text=${String(crossRole.payload?.result?.content?.[0]?.text || '').slice(0, 80)}`);
+check('synthetic fixture tool hidden from sales', crossRoleDenied && !String(crossRole.payload?.result?.content?.[0]?.text || '').includes('recruiter-fixture-marker'), `isError=${crossRole.payload?.result?.isError} text=${String(crossRole.payload?.result?.content?.[0]?.text || '').slice(0, 80)}`);
 
 const unknown = await rpc({ jsonrpc: '2.0', id: 8, method: 'tools/list', params: {} }, 'mcp_i05c_definitely_not_a_valid_key_0000000000000000');
 check('unknown key denied', unknown.payload?.error?.code === -32001, `code=${unknown.payload?.error?.code}`);
