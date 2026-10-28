@@ -12,19 +12,18 @@ const { createTypeScriptBridge } = require('../src/js-ts-code-tsc.js');
 const tool = createJsTsCodeProvider({}, { tsc: createTypeScriptBridge() }).tools[0];
 const call = (args) => tool.handler(args, {});
 
-test('tool schema exposes the module format, existingPath and existingCode inputs', () => {
+test('tool schema exposes the module format, existing_path and existing_code inputs', () => {
   const properties = tool.inputSchema.properties;
   assert.ok(properties.module, 'module input is declared');
   assert.deepEqual(properties.module.enum, ['cjs', 'esm', 'auto']);
-  assert.ok(properties.existingPath, 'existingPath input is declared');
-  assert.ok(properties.existingCode, 'existingCode input is declared');
+  assert.ok(properties.existing_path, 'existing_path input is declared');
+  assert.ok(properties.existing_code, 'existing_code input is declared');
   assert.equal(tool.providerId, 'js-ts-code');
 });
 
 test('the description tells the caller that the Code Mode sandbox cannot load modules', () => {
-  assert.match(tool.description, /require/);
-  assert.match(tool.description, /import\(\)/);
   assert.match(tool.description, /writePath/);
+  assert.match(tool.description, /shell tool/);
 });
 
 test('module format detection tells CJS and ESM apart', () => {
@@ -97,24 +96,24 @@ test('TypeScript validation reports valid code', async () => {
 test('writing a file lands inside the allowed root and refuses to escape it', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jsts-root-'));
   const scoped = createJsTsCodeProvider({}, { tsc: createTypeScriptBridge(), writeRoot: root }).tools[0];
-  const ok = await scoped.handler({ code: 'export const ok = true;', language: 'javascript', writePath: 'nested/ok.js' }, {});
+  const ok = await scoped.handler({ code: 'export const ok = true;', language: 'javascript', write_path: 'nested/ok.js' }, {});
   assert.ok(ok.writtenTo, ok.warnings.join('; '));
   assert.equal(fs.readFileSync(path.join(root, 'nested/ok.js'), 'utf8'), 'export const ok = true;');
 
-  const escaped = await scoped.handler({ code: 'export const ok = true;', language: 'javascript', writePath: '../escaped.js' }, {});
+  const escaped = await scoped.handler({ code: 'export const ok = true;', language: 'javascript', write_path: '../escaped.js' }, {});
   assert.equal(escaped.writtenTo, undefined);
   assert.ok(escaped.warnings.some((w) => /allowed root/.test(w)));
   assert.equal(fs.existsSync(path.join(path.dirname(root), 'escaped.js')), false);
 });
 
-test('existingPath reads the file that should be modified', async () => {
+test('existing_path reads the file that should be modified', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jsts-root-'));
   fs.writeFileSync(path.join(root, 'current.js'), 'export const current = 1;\n', 'utf8');
   const scoped = createJsTsCodeProvider({}, { tsc: createTypeScriptBridge(), writeRoot: root }).tools[0];
-  const found = await scoped.handler({ code: 'export const current = 1;', language: 'javascript', existingPath: 'current.js' }, {});
+  const found = await scoped.handler({ code: 'export const current = 1;', language: 'javascript', existing_path: 'current.js' }, {});
   assert.equal(found.warnings.filter((w) => /existingPath/.test(w)).length, 0, found.warnings.join('; '));
 
-  const missing = await scoped.handler({ code: 'export const current = 1;', language: 'javascript', existingPath: 'nope.js' }, {});
+  const missing = await scoped.handler({ code: 'export const current = 1;', language: 'javascript', existing_path: 'nope.js' }, {});
   assert.ok(missing.warnings.some((w) => /existingPath could not be read/.test(w)), missing.warnings.join('; '));
 });
 
@@ -134,7 +133,7 @@ test('a runtime without a filesystem refuses to write and says why', async () =>
   const workerish = createJsTsCodeProvider({}, {
     capabilities: { eval: false, spawn: false, fs: false, childProcess: null, fsModule: null, pathModule: null },
   }).tools[0];
-  const result = await workerish.handler({ code: 'export const ok = true;', language: 'javascript', writePath: 'out.js' }, {});
+  const result = await workerish.handler({ code: 'export const ok = true;', language: 'javascript', write_path: 'out.js' }, {});
   assert.equal(result.writtenTo, undefined);
   assert.ok(result.warnings.some((w) => /not supported in this runtime/.test(w)), result.warnings.join('; '));
 });
@@ -145,7 +144,7 @@ test('a missing Ladder key fails with an actionable message', async () => {
   delete process.env.LADDER_API_KEY;
   try {
     await assert.rejects(
-      () => provider.tools[0].handler({ task: 'write a function that adds two numbers' }, {}),
+      () => provider.tools[0].handler({ task_natural_language_description: 'write a function that adds two numbers' }, {}),
       /LADDER_API_KEY is not configured/,
     );
   } finally {

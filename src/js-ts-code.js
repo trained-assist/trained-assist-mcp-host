@@ -492,41 +492,31 @@ function createJsTsCodeProvider(env = {}, options = {}) {
       {
         name: 'write',
         description:
-          'JavaScript/TypeScript code writer. Generates code from a natural-language task with an LLM, validates the syntax, and can write the result to a file. ' +
-          'CALL (Code Mode): tools["js-ts-code"].write({ task, language, ... }). ' +
-          'IMPORTANT: the Code Mode `execute` sandbox cannot load modules (no require, no import()) and cannot touch the filesystem. ' +
-          'Do not run generated code with require()/import() inside execute: land it with writePath (or the file-write tool) and run it with the shell tool. ' +
-          'Inputs: task (describe the code to write) | code (existing source to validate only) | existingPath (file to read and modify) | existingCode (current code to modify); ' +
-          'iterations (string[]: run steps sequentially, each building on the previous result); ' +
-          'language ("javascript"|"typescript", default "javascript"); module ("cjs"|"esm"|"auto", default "auto") pins the module format of the generated code; ' +
-          'typeCheck (TypeScript only: full tsc --noEmit, slower, needs the TypeScript compiler); maxTokens (per LLM call, default 2000); ' +
-          'model (Ladder model id: service|build|conversation|plan|research|doctor, default service); autoChunk (split a large task into waves of steps); ' +
-          'noComments (strip comments/JSDoc); writePath (write the result to this path inside the allowed root); context (project conventions/field names). ' +
-          'task takes precedence over code (code ignored); iterations takes precedence over task/code. ' +
-          'Returns { code, language, moduleFormat, valid, error, note, iterations, warnings, writtenTo?, usage }. ' +
-          'valid is null when the runtime cannot verify the syntax; that is not a failure of the generated code. ' +
-          'Limits: one call takes roughly 10-120s and produces about 80-120 lines; use autoChunk for larger work. Single file per call.',
+          'JS/TS code writer. Generates, validates, and optionally writes code. ' +
+          'Code Mode: tools["js-ts-code"].write({...}). Sandbox cannot load modules or touch fs — use writePath + shell tool. ' +
+          'task > code (validation only); task_iterations > task/code. ' +
+          'Returns { code, language, moduleFormat, valid, error, note, iterations, warnings, writtenTo?, usage }. valid=null means runtime cannot verify. ' +
+          'One call: 10-120s, ~80-120 lines. Use autoChunk for larger work.',
         inputSchema: {
           type: 'object',
           properties: {
-            task: { type: 'string', description: 'Natural-language description of the code to write or modify.' },
-            code: { type: 'string', description: 'Existing source code to validate instead of generating.' },
-            existingCode: { type: 'string', description: 'Current code to modify according to task.' },
-            existingPath: { type: 'string', description: 'Path of an existing file to read and use as the code to modify.' },
-            iterations: {
+            task_natural_language_description: { type: 'string' },
+            code: { type: 'string' },
+            existing_code: { type: 'string' },
+            existing_path: { type: 'string' },
+            task_iterations: {
               type: 'array',
-              description: 'List of iteration tasks to run sequentially; each builds on the previous result. Use for complex tasks split into steps.',
               items: { type: 'string' },
             },
             language: { type: 'string', enum: ['javascript', 'typescript'], default: 'javascript' },
-            module: { type: 'string', enum: MODULE_FORMATS, default: 'auto', description: 'Module format of the generated code: cjs, esm, or auto.' },
-            typeCheck: { type: 'boolean', default: false, description: 'For TS: run full tsc --noEmit type checking (slower, needs the TypeScript compiler).' },
-            maxTokens: { type: 'number', default: DEFAULT_MAX_TOKENS, description: 'Max output tokens per LLM call; lower = faster/smaller. Default 2000 (~80-120 lines).' },
-            model: { type: 'string', description: 'Ladder model id override (default service).' },
-            autoChunk: { type: 'boolean', default: false, description: 'Split a large task into waves of 2-3 steps, re-planning from the current code until done.' },
-            noComments: { type: 'boolean', default: false, description: 'Suppress comments/JSDoc in generated code (repo style).' },
-            writePath: { type: 'string', description: 'Optional: write the resulting code to this file path (inside allowed root). Returns writtenTo.' },
-            context: { type: 'string', description: 'Optional project context/conventions (types, field names, structure) to guide generation.' },
+            module: { type: 'string', enum: MODULE_FORMATS, default: 'auto' },
+            type_check: { type: 'boolean', default: false },
+            max_tokens: { type: 'number', default: DEFAULT_MAX_TOKENS },
+            model: { type: 'string' },
+            auto_chunk: { type: 'boolean', default: false },
+            no_comments: { type: 'boolean', default: false },
+            write_path: { type: 'string' },
+            context: { type: 'string' },
           },
           additionalProperties: false,
         },
@@ -538,10 +528,19 @@ function createJsTsCodeProvider(env = {}, options = {}) {
           const root = resolveWriteRoot(options, caps);
           const signal = providerContext.signal || null;
           const {
-            task, code, existingCode, existingPath, iterations,
-            language, module: moduleInput, typeCheck, maxTokens, model,
-            autoChunk, noComments, writePath, context,
+            task_natural_language_description, code, existing_code, existing_path, task_iterations,
+            language, module: moduleInput, type_check, max_tokens, model,
+            auto_chunk, no_comments, write_path, context,
           } = args || {};
+          const task = task_natural_language_description;
+          const existingCode = existing_code;
+          const existingPath = existing_path;
+          const iterations = task_iterations;
+          const typeCheck = type_check;
+          const maxTokens = max_tokens;
+          const autoChunk = auto_chunk;
+          const noComments = no_comments;
+          const writePath = write_path;
 
           const lang = language === 'typescript' ? 'typescript' : 'javascript';
           const requestedFormat = MODULE_FORMATS.includes(moduleInput) ? moduleInput : 'auto';
