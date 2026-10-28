@@ -146,3 +146,14 @@ The Worker route `/js-ts-code` in `src/worker-unified.mjs` is a billable LLM end
 
 - `CI` runs on every pull request: `npm run check`, `npm test`, dependency-boundary check and package dry run.
 - The Workers stay manual: trigger `Deploy Registry MCP test Worker` or `Remote test Worker E2E` in GitHub Actions (or via `gh workflow run`). No agent-runner credential provisioning happens automatically.
+
+## Catalog contract enforcement
+
+`test/catalog-pins.test.js` and `test/tool-quality.test.js` enforce the tool contract that the catalog digest encodes:
+
+- **Digest pins must stay in sync.** Every tool's `name`, `description`, and `inputSchema` is hashed into the catalog digest. If any of them change, the digest changes, and the test fails. A failing test means the developer must deliberately update the pinned digest in this repo's README **and** in the consuming repos that hardcode it:
+  - `trained-assist-control-plane/src/router/user-sandbox-mcp.ts:8` (`USER_MCP_DIGEST`)
+  - `trained-assist-control-plane/src/router/mcp-catalogue.ts:12` and `registry-test-mcp.ts` (`TEST_REGISTRY_DIGEST`)
+  - `runner-serverless-api/src/cloudflare/run-coordinator.ts:30` (`MCP_TEST.digest`) and `adapters/remote-mcp.ts:94`
+- **Parameter names must be snake_case.** `test/tool-quality.test.js` rejects camelCase `inputSchema` properties. The only exception is `google_docs.get_document.documentId`, which is allowlisted with a TODO: renaming it to `document_id` would change the human catalog digest and break the `USER_MCP_DIGEST` pin — it must be done in a coordinated release.
+- **Tool descriptions must stay under 800 characters.** The longest current description is `search_serper` at 704 characters. The budget catches runaway verbosity (the pre-refactor `js-ts-code` description was ~1,500 characters).
